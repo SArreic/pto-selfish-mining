@@ -1,3 +1,4 @@
+import random
 import time
 from typing import Dict, Optional
 
@@ -52,13 +53,21 @@ class SynchronizedMultiProcessOrchestrator(MultiProcessOrchestrator):
         return False
 
     def before_running(self) -> None:
-        torch.set_deterministic(True)
+        # torch.set_deterministic(True)\
+        seed_value = random.randint(0, 2 ** 32 - 1)
+        torch.manual_seed(seed_value)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
         torch.set_num_threads(1)
         super().before_running()
 
     def run_episodes(self, evaluation: bool) -> None:
         # Disable torch multithreading
-        torch.set_deterministic(True)
+        # torch.set_deterministic(True)
+        seed_value = random.randint(1, self.train_episode_length)
+        torch.manual_seed(seed_value)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
         torch.set_num_threads(1)
 
         super().run_episodes(evaluation)
