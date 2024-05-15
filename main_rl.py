@@ -53,29 +53,29 @@ def solve_pt(args: argparse.Namespace) -> None:
     print(f'{mdp.state_space.size:,}')
     rev, _ = solve_mdp_exactly(mdp)
 
-    # trainer = LDDQNTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info, random_seed=0,
-    #                        output_root=args.output_root, expected_horizon=10_000, depth=10, batch_size=100,
-    #                        dropout=0, starting_epsilon=0.01, epsilon_step=0, bva_smart_init=smart_init,
-    #                        num_of_episodes_for_average=100, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
-    #                        epoch_length=10_000, num_of_epochs=1000, replay_buffer_size=20_000,
-    #                        use_base_approximation=True, ground_initial_state=False,
-    #                        train_episode_length=1000, evaluate_episode_length=1000,
-    #                        number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-    #                        # number_of_evaluation_agents=1, number_of_training_agents=1,
-    #                        lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
-    #                        output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
+    trainer = LDDQNTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info, random_seed=0,
+                           output_root=args.output_root, expected_horizon=10_000, depth=10, batch_size=100,
+                           dropout=0, starting_epsilon=0.01, epsilon_step=0, bva_smart_init=smart_init,
+                           num_of_episodes_for_average=100, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
+                           epoch_length=10_000, num_of_epochs=1000, replay_buffer_size=20_000,
+                           use_base_approximation=True, ground_initial_state=False,
+                           train_episode_length=1000, evaluate_episode_length=1000,
+                           number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
+                           # number_of_evaluation_agents=1, number_of_training_agents=1,
+                           lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
+                           output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
 
-    trainer = SACTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info, random_seed=0,
-                         output_root=args.output_root, expected_horizon=10_000, depth=10, batch_size=100,
-                         dropout=0, starting_epsilon=0.01, epsilon_step=0, bva_smart_init=smart_init,
-                         num_of_episodes_for_average=100, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
-                         epoch_length=10_000, num_of_epochs=1000, replay_buffer_size=20_000,
-                         use_base_approximation=True, ground_initial_state=False,
-                         train_episode_length=1000, evaluate_episode_length=1000,
-                         number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                         # number_of_evaluation_agents=1, number_of_training_agents=1,
-                         lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
-                         output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
+    # trainer = SACTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info, random_seed=0,
+    #                      output_root=args.output_root, expected_horizon=10_000, depth=10, batch_size=100,
+    #                      dropout=0, starting_epsilon=0.01, epsilon_step=0, bva_smart_init=smart_init,
+    #                      num_of_episodes_for_average=100, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
+    #                      epoch_length=10_000, num_of_epochs=1000, replay_buffer_size=20_000,
+    #                      use_base_approximation=True, ground_initial_state=False,
+    #                      train_episode_length=1000, evaluate_episode_length=1000,
+    #                      number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
+    #                      # number_of_evaluation_agents=1, number_of_training_agents=1,
+    #                      lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
+    #                      output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
 
     trainer.run()
 
@@ -93,31 +93,31 @@ def solve_pt_multiple_times(args: argparse.Namespace, times: int = 10) -> None:
 
     for run_index in range(times):
         print(f'Training Iteration {run_index}')
-        # trainer = LDDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-        #                        output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-        #                        dropout=0.0, starting_epsilon=0.01, epsilon_step=0,
-        #                        num_of_episodes_for_average=20, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
-        #                        epoch_length=10000, epoch_size=10000, num_of_epochs=150, replay_buffer_size=20000,
-        #                        use_base_approximation=True, ground_initial_state=False,
-        #                        train_episode_length=10000, evaluate_episode_length=10000,
-        #                        number_of_evaluation_agents=args.eval_agents,
-        #                        number_of_training_agents=args.train_agents,
-        #                        # number_of_evaluation_agents=1, number_of_training_agents=1,
-        #                        lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
-        #                        normalize_target_values=True)
+        trainer = LDDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
+                               output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
+                               dropout=0.0, starting_epsilon=0.01, epsilon_step=0,
+                               num_of_episodes_for_average=20, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
+                               epoch_length=10000, epoch_size=10000, num_of_epochs=150, replay_buffer_size=20000,
+                               use_base_approximation=True, ground_initial_state=False,
+                               train_episode_length=10000, evaluate_episode_length=10000,
+                               number_of_evaluation_agents=args.eval_agents,
+                               number_of_training_agents=args.train_agents,
+                               # number_of_evaluation_agents=1, number_of_training_agents=1,
+                               lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
+                               normalize_target_values=True)
 
-        trainer = SACTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-                             output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-                             dropout=0.0, starting_epsilon=0.01, epsilon_step=0,
-                             num_of_episodes_for_average=20, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
-                             epoch_length=10000, epoch_size=10000, num_of_epochs=150, replay_buffer_size=20000,
-                             use_base_approximation=True, ground_initial_state=False,
-                             train_episode_length=10000, evaluate_episode_length=10000,
-                             number_of_evaluation_agents=args.eval_agents,
-                             number_of_training_agents=args.train_agents,
-                             # number_of_evaluation_agents=1, number_of_training_agents=1,
-                             lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
-                             normalize_target_values=True)
+        # trainer = SACTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
+        #                      output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
+        #                      dropout=0.0, starting_epsilon=0.01, epsilon_step=0,
+        #                      num_of_episodes_for_average=20, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
+        #                      epoch_length=10000, epoch_size=10000, num_of_epochs=150, replay_buffer_size=20000,
+        #                      use_base_approximation=True, ground_initial_state=False,
+        #                      train_episode_length=10000, evaluate_episode_length=10000,
+        #                      number_of_evaluation_agents=args.eval_agents,
+        #                      number_of_training_agents=args.train_agents,
+        #                      # number_of_evaluation_agents=1, number_of_training_agents=1,
+        #                      lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
+        #                      normalize_target_values=True)
 
         trainer.run()
 
@@ -164,23 +164,23 @@ def solve_sm(args: argparse.Namespace) -> None:
     print(f'{mdp.state_space.size:,}')
     rev, _ = solve_mdp_exactly(mdp)
 
-    # trainer = LSMDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-    #                         output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-    #                         starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
-    #                         nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
-    #                         train_episode_length=10000, evaluate_episode_length=1000,
-    #                         use_base_approximation=True, ground_initial_state=False,
-    #                         number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-    #                         lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
+    trainer = LSMDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
+                            output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
+                            starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
+                            nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
+                            train_episode_length=10000, evaluate_episode_length=1000,
+                            use_base_approximation=True, ground_initial_state=False,
+                            number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
+                            lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
 
-    trainer = SACTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-                         output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-                         starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
-                         nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
-                         train_episode_length=10000, evaluate_episode_length=1000,
-                         use_base_approximation=True, ground_initial_state=False,
-                         number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                         lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
+    # trainer = SACTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
+    #                      output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
+    #                      starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
+    #                      nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
+    #                      train_episode_length=10000, evaluate_episode_length=1000,
+    #                      use_base_approximation=True, ground_initial_state=False,
+    #                      number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
+    #                      lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
 
     trainer.run()
 
@@ -192,23 +192,23 @@ def solve_fees(args: argparse.Namespace) -> None:
     mdp = EthereumModel(alpha=0.35, max_fork=10)
     print(f'{mdp.state_space.size:,}')
 
-    # trainer = LDDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-    #                        output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-    #                        starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
-    #                        nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
-    #                        rain_episode_length=10000, evaluate_episode_length=1000,
-    #                        use_base_approximation=True, ground_initial_state=False,
-    #                        number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-    #                        lower_priority=args.no_bg, bind_all=args.bind_all)
+    trainer = LDDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
+                           output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
+                           starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
+                           nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
+                           rain_episode_length=10000, evaluate_episode_length=1000,
+                           use_base_approximation=True, ground_initial_state=False,
+                           number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
+                           lower_priority=args.no_bg, bind_all=args.bind_all)
 
-    trainer = SACTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-                         output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-                         starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
-                         nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
-                         rain_episode_length=10000, evaluate_episode_length=1000,
-                         use_base_approximation=True, ground_initial_state=False,
-                         number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                         lower_priority=args.no_bg, bind_all=args.bind_all)
+    # trainer = SACTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
+    #                      output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
+    #                      starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
+    #                      nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
+    #                      rain_episode_length=10000, evaluate_episode_length=1000,
+    #                      use_base_approximation=True, ground_initial_state=False,
+    #                      number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
+    #                      lower_priority=args.no_bg, bind_all=args.bind_all)
 
     trainer.run()
 
@@ -219,23 +219,23 @@ def test_mcts(args: argparse.Namespace) -> None:
     print(f'{mdp.state_space.size:,}')
     rev, p = solve_mdp_exactly(mdp)
 
-    # trainer = LDDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-    #                        output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-    #                        starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
-    #                        nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
-    #                        train_episode_length=10000, evaluate_episode_length=1000,
-    #                        use_base_approximation=True, ground_initial_state=False,
-    #                        number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-    #                        lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
+    trainer = LDDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
+                           output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
+                           starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
+                           nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
+                           train_episode_length=10000, evaluate_episode_length=1000,
+                           use_base_approximation=True, ground_initial_state=False,
+                           number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
+                           lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
 
-    trainer = SACTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-                         output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-                         starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
-                         nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
-                         train_episode_length=10000, evaluate_episode_length=1000,
-                         use_base_approximation=True, ground_initial_state=False,
-                         number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                         lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
+    # trainer = SACTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
+    #                      output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
+    #                      starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
+    #                      nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
+    #                      train_episode_length=10000, evaluate_episode_length=1000,
+    #                      use_base_approximation=True, ground_initial_state=False,
+    #                      number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
+    #                      lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
 
     trainer.run()
 

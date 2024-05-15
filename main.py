@@ -3,7 +3,7 @@ import time
 
 import matplotlib as mpl
 import numpy as np
-# from blockchain_mdps.bitcoin_mdp import BitcoinMDP
+from blockchain_mdps.bitcoin_mdp import BitcoinMDP
 
 mpl.use('Agg')
 
