@@ -125,13 +125,14 @@ def create_speed_graph(save_file_name: str, files: List[str]) -> None:
 
 if __name__ == '__main__':
     name = 'scaling'
-    file_name = rf'C:\Users\rbrz3\Desktop\ablations\{name}.txt'
+    # file_name = rf'C:\Users\rbrz3\Desktop\ablations\{name}.txt'
+    file_name = rf'C:\Users\Qiyuan Huang\Desktop\cxsj\pto-selfish-mining\experiments\sac\log.txt'
 
     with open(file_name) as file:
         log = file.read()
 
     values_by_epoch = np.array([float(value) for value in re.findall('- Base Value Approximation (.+)', log)])
-    np.savetxt(rf'C:\Users\rbrz3\Desktop\ablations\{name}.dat', values_by_epoch)
+    np.savetxt(rf'C:\Users\Qiyuan Huang\Desktop\cxsj\pto-selfish-mining\experiments\sac\{name}.dat', values_by_epoch)
 
     exit()
     if len(sys.argv) < 2:

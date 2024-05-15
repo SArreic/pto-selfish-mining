@@ -40,6 +40,7 @@ def run_mcts_fees(args: argparse.Namespace):
     with io.open(experiment_load_log_path, 'r') as file:
         log = file.read()
 
+    # m = re.search(r'blockchain_model: BitcoinFeeModel\((.*?)\),', log)
     m = re.search(r'blockchain_model: BitcoinFeeModel\((.*?)\),', log)
     alpha, gamma, max_fork, fee, transaction_chance, max_pool = tuple(
         [float(val.strip()) for val in m.group(1).split(',')])
@@ -63,7 +64,8 @@ def run_mcts_fees(args: argparse.Namespace):
 
     load_epoch = max(simulation_revenues)[1]
 
-    trainer = MCTSTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info + '_simulation',
+    trainer = MCTSTrainer(mdp, orchestrator_type='synced_multi_process',
+                          build_info='_simulation' if args.build_info is None else args.build_info + '_simulation',
                           output_root=args.output_root, output_profile=False, output_memory_snapshots=False,
                           random_seed=args.seed, expected_horizon=10_000, depth=5, batch_size=1, dropout=0,
                           length_factor=100_000, starting_epsilon=0.05, epsilon_step=0, prune_tree_rate=250,

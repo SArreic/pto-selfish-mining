@@ -5,6 +5,7 @@ from typing import Any
 import psutil
 
 import blockchain_mdps
+from blockchain_mdps import BitcoinModel
 
 
 class BinarySearch:

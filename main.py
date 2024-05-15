@@ -1,12 +1,11 @@
 import sys
 import time
 
-from blockchain_mdps.bitcoin_mdp import BitcoinMDP
-
-import numpy as np
 import matplotlib as mpl
+import numpy as np
+# from blockchain_mdps.bitcoin_mdp import BitcoinMDP
+
 mpl.use('Agg')
-import matplotlib.pyplot as plt
 
 
 def main():
