@@ -1,9 +1,0 @@
-0.4 0.5 50 10000 1e-05 100000000
-7804
-0.4
-WARNING: check conditions of convergence. With no discount, convergence can not be assumed.
-0.5722652746559281
-(7804,)
-Revenue: 0.5725071305780524
-Iterations: 7
-Time elapsed: 1.4259679317474365

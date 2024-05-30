@@ -57,11 +57,33 @@ class LDDQNAgent(BVAAgent):
 
         return action, torch.tensor([target_value], device=self.simulator.device, dtype=torch.float)
 
+    # def action_value(self, state: BlockchainModel.State, action: int, depth: int, exploring: bool) -> float:
+    #     transition_values = self.simulator.get_state_transition_values(state, action)
+    #     total_value = 0
+    #     for next_state in transition_values.probabilities.keys():
+    #         value, _ = self.state_value(next_state, depth - 1, exploring)
+    #
+    #         # Discount by difficulty contribution
+    #         value *= self.calculate_difficulty_contribution_discount(
+    #             transition_values.difficulty_contributions[next_state])
+    #
+    #         # Add transition reward
+    #         value += transition_values.rewards[next_state] / self.simulator.expected_horizon
+    #
+    #         # Multiply by transition probability
+    #         value *= transition_values.probabilities[next_state]
+    #
+    #         total_value += value
+    #
+    #     return total_value
+
+    # only 1 step will be predicted in this case
     def action_value(self, state: BlockchainModel.State, action: int, depth: int, exploring: bool) -> float:
         transition_values = self.simulator.get_state_transition_values(state, action)
         total_value = 0
         for next_state in transition_values.probabilities.keys():
-            value, _ = self.state_value(next_state, depth - 1, exploring)
+            # Set depth to 0 to ensure only one step is predicted
+            value, _ = self.state_value(next_state, 0, exploring)
 
             # Discount by difficulty contribution
             value *= self.calculate_difficulty_contribution_discount(
