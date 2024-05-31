@@ -98,10 +98,10 @@ class BitcoinFeeModel(BlockchainModel):
     def is_state_valid(self, state: BlockchainModel.State) -> bool:
         a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
         return self.is_chain_valid(a) and self.is_chain_valid(h) \
-               and length_a == self.chain_length(a) \
-               and length_h == self.chain_length(h) \
-               and transactions_a == self.chain_transactions(a) <= pool \
-               and transactions_h == self.chain_transactions(h) <= pool
+            and length_a == self.chain_length(a) \
+            and length_h == self.chain_length(h) \
+            and transactions_a == self.chain_transactions(a) <= pool \
+            and transactions_h == self.chain_transactions(h) <= pool
 
     @staticmethod
     def truncate_chain(chain: tuple, truncate_to: int) -> tuple:
