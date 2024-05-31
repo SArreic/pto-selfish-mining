@@ -161,6 +161,29 @@ class MDPBlockchainSimulator:
 
         return legal_actions
 
+    # def get_state_legal_actions(self, state: BlockchainModel.State) -> List[int]:
+    #     legal_actions = []
+    #     for action_index in range(self.num_of_actions):
+    #         action = self.action_index_to_action(action_index)
+    #         # Illegal by def
+    #         if action is self._model.Action.Illegal or \
+    #                 (isinstance(action, tuple) and action[0] is self._model.Action.Illegal):
+    #             continue
+    #
+    #         transitions = self._model.get_state_transitions(state, self.action_index_to_action(action_index),
+    #                                                         check_valid=self.check_valid_states)
+    #
+    #         # Illegal if returned error penalty
+    #         final_state_probability = transitions.probabilities.get(self.final_state, 0)
+    #         final_state_reward = transitions.rewards.get(self.final_state, 0)
+    #
+    #         if final_state_probability == 1 and final_state_reward == self._model.error_penalty:
+    #             continue
+    #
+    #         legal_actions.append(action_index)
+    #
+    #     return legal_actions
+
     def revenue(self) -> float:
         try:
             return self._cumulative_reward / self._cumulative_difficulty_contribution

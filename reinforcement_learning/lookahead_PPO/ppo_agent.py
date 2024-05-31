@@ -5,7 +5,7 @@ from ..base.experience_acquisition.agents.bva_agent import BVAAgent
 from ..base.function_approximation.approximator import Approximator
 
 
-class PPOAgent(BVAAgent, ABC):
+class PPOAgent(BVAAgent):
     def __init__(self, actor_critic, clip_param, ppo_epoch, num_mini_batch, value_loss_coef, entropy_coef,
                  approximator: Approximator, simulator: MDPBlockchainSimulator, lr=None, eps=None, max_grad_norm=None):
         super().__init__(approximator, simulator)

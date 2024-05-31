@@ -2,6 +2,10 @@ to obtain result and save, run the command to train:
 python main_rl.py > sac_res.txt 2>&1
 python main_rl.py > dqn_res.txt 2>&1
 python main_rl.py > dqn_res_1_step.txt 2>&1
+When running eth2.0, use these commands instead:
+python main_rl_4e2.py > sac_res_e2.txt 2>&1
+python main_rl_4e2.py > dqn_res_e2.txt 2>&1
+python main_rl_4e2.py > dqn_res_1_step_e2.txt 2>&1
 and then run the command to do simulations:
 python rl_long_simulation.py --output_root "C:\Users\Qiyuan Huang\Desktop\cxsj\pto-selfish-mining\experiments\sac\logs" --load_experiment "BitcoinFeeModel(0.35, 0.5, 10, 10, 0.01, 10)_20240330-165127"
 or to store the result in a .txt file:

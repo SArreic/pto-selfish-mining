@@ -1,4 +1,5 @@
 from collections import deque
+from typing import Optional
 
 import torch
 
@@ -32,6 +33,14 @@ class SequentialReplayBuffer(ReplayBuffer):
     def sample(self) -> ExperienceBatch:
         samples = [self.buffer.base_deque.popleft() for _ in range(self.batch_size)]
         return ExperienceBatch.from_experience_list(samples, self.device)
+
+    # def sample(self) -> Optional[ExperienceBatch]:
+    #     if len(self.buffer.base_deque) < self.batch_size:
+    #         print("Not enough samples in the replay buffer to sample.")
+    #         return None
+    #
+    #     samples = [self.buffer.base_deque.popleft() for _ in range(self.batch_size)]
+    #     return ExperienceBatch.from_experience_list(samples, self.device)
 
     def max_size(self) -> int:
         return self.buffer.max_size()

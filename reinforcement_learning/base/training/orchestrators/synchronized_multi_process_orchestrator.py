@@ -51,6 +51,21 @@ class SynchronizedMultiProcessOrchestrator(MultiProcessOrchestrator):
 
         return False
 
+    # def gather_experience(self) -> bool:
+    #     if len(self.replay_buffer) > 0:
+    #         # Already training
+    #         pass
+    #     else:
+    #         # Gather data from all agents
+    #         for _ in range(self.number_of_training_agents):
+    #             batch = self.replay_buffer_agent_queue.sample()
+    #             if batch is not None:
+    #                 self.replay_buffer_synchronizer.append(batch)
+    #             else:
+    #                 print("Not enough samples in the replay buffer to sample. Skipping experience gathering.")
+    #                 return False
+    #     return True
+
     def before_running(self) -> None:
         torch.set_deterministic(True)
         torch.set_num_threads(1)

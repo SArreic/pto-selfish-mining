@@ -24,7 +24,8 @@ class Ethereum2Model(BlockchainModel):
         self._honest_validators_b = 2 ** (self._reward_dist_b - 1)
 
         self.Fork = self.create_int_enum('Fork', ['Relevant', 'Active'])
-        self.Action = self.create_int_enum('Action', ['Propose', 'Attest', 'Slash', 'Wait'])
+        self.Action = self.create_int_enum('Action',
+                                           ['Illegal', 'Propose', 'Attest', 'Slash', 'Wait'])
 
         super().__init__()
 
@@ -63,12 +64,20 @@ class Ethereum2Model(BlockchainModel):
                 new_hu = (hu << 1) % self._honest_validators_b
 
                 proposer_block = 1, 0, self.Fork.Relevant, 0, new_hu, 0
-                transitions.add(proposer_block, probability=self.alpha,
-                                reward=self.validator_rewards[h % self._reward_dist_b])
+                if proposer_block in transitions.probabilities:
+                    transitions.probabilities[proposer_block] += self.alpha
+                    transitions.rewards[proposer_block] += self.validator_rewards[h % self._reward_dist_b]
+                else:
+                    transitions.add(proposer_block, probability=self.alpha,
+                                    reward=self.validator_rewards[h % self._reward_dist_b])
 
                 honest_block = 0, 1, self.Fork.Relevant, 0, new_hu, 0
-                transitions.add(honest_block, probability=1 - self.alpha,
-                                reward=self.validator_rewards[h % self._reward_dist_b])
+                if honest_block in transitions.probabilities:
+                    transitions.probabilities[honest_block] += 1 - self.alpha
+                    transitions.rewards[honest_block] += self.validator_rewards[h % self._reward_dist_b]
+                else:
+                    transitions.add(honest_block, probability=1 - self.alpha,
+                                    reward=self.validator_rewards[h % self._reward_dist_b])
             else:
                 transitions.add(self.final_state, probability=1, reward=self.inactivity_penalty)
 
@@ -77,33 +86,55 @@ class Ethereum2Model(BlockchainModel):
                 new_hu = (hu << 1) % self._honest_validators_b
 
                 attester_block = a + 1, h, self.Fork.Relevant, 0, new_hu, 0
-                transitions.add(attester_block, probability=self.alpha,
-                                reward=self.validator_rewards[h % self._reward_dist_b])
+                if attester_block in transitions.probabilities:
+                    transitions.probabilities[attester_block] += self.alpha
+                    transitions.rewards[attester_block] += self.validator_rewards[h % self._reward_dist_b]
+                else:
+                    transitions.add(attester_block, probability=self.alpha,
+                                    reward=self.validator_rewards[h % self._reward_dist_b])
 
                 honest_block = a, h + 1, self.Fork.Relevant, 0, new_hu, 0
-                transitions.add(honest_block, probability=1 - self.alpha,
-                                reward=self.validator_rewards[h % self._reward_dist_b])
+                if honest_block in transitions.probabilities:
+                    transitions.probabilities[honest_block] += 1 - self.alpha
+                    transitions.rewards[honest_block] += self.validator_rewards[h % self._reward_dist_b]
+                else:
+                    transitions.add(honest_block, probability=1 - self.alpha,
+                                    reward=self.validator_rewards[h % self._reward_dist_b])
             else:
                 transitions.add(self.final_state, probability=1, reward=self.inactivity_penalty)
 
         if action is self.Action.Slash:
             if h > 0 and r == 0:
                 slashed_block = a, h, self.Fork.Relevant, 0, hu, 0
-                transitions.add(slashed_block, probability=self.alpha, reward=-self.slashing_penalty)
+                if slashed_block in transitions.probabilities:
+                    transitions.probabilities[slashed_block] += self.alpha
+                    transitions.rewards[slashed_block] -= self.slashing_penalty
+                else:
+                    transitions.add(slashed_block, probability=self.alpha, reward=-self.slashing_penalty)
 
                 honest_block = a, h, self.Fork.Relevant, 0, hu, 0
-                transitions.add(honest_block, probability=1 - self.alpha,
-                                reward=self.validator_rewards[h % self._reward_dist_b])
+                if honest_block in transitions.probabilities:
+                    transitions.probabilities[honest_block] += 1 - self.alpha
+                    transitions.rewards[honest_block] += self.validator_rewards[h % self._reward_dist_b]
+                else:
+                    transitions.add(honest_block, probability=1 - self.alpha,
+                                    reward=self.validator_rewards[h % self._reward_dist_b])
             else:
                 transitions.add(self.final_state, probability=1, reward=self.inactivity_penalty)
 
         if action is self.Action.Wait:
             if fork is not self.Fork.Active and a < self.max_fork and h < self.max_fork:
                 proposer_block = a + 1, h, self.Fork.Relevant, 0, hu, r
-                transitions.add(proposer_block, probability=self.alpha)
+                if proposer_block in transitions.probabilities:
+                    transitions.probabilities[proposer_block] += self.alpha
+                else:
+                    transitions.add(proposer_block, probability=self.alpha)
 
                 honest_block = a, h + 1, self.Fork.Relevant, 0, hu, r
-                transitions.add(honest_block, probability=1 - self.alpha)
+                if honest_block in transitions.probabilities:
+                    transitions.probabilities[honest_block] += 1 - self.alpha
+                else:
+                    transitions.add(honest_block, probability=1 - self.alpha)
             else:
                 transitions.add(self.final_state, probability=1, reward=self.inactivity_penalty)
 
@@ -143,6 +174,15 @@ class Ethereum2Model(BlockchainModel):
 
         return tuple(policy)
 
+    def get_honest_revenue(self) -> float:
+        """
+        Calculate the expected revenue of an honest validator using the honest policy.
+        """
+        honest_policy = self.build_honest_policy()
+        solver = SparseBlockchainMDP(self)
+        revenue = solver.calc_policy_revenue(honest_policy)
+        return revenue
+
 
 if __name__ == '__main__':
     print('ethereum2_mdp module test')
@@ -157,3 +197,8 @@ if __name__ == '__main__':
     solver = SparseBlockchainMDP(mdp)
     mdp.print_policy(p, solver.find_reachable_states(p))
     print(solver.calc_policy_revenue(p))
+
+    # Calculate and print honest revenue
+    honest_revenue = mdp.get_honest_revenue()
+    print(f'Honest Revenue: {honest_revenue}')
+
