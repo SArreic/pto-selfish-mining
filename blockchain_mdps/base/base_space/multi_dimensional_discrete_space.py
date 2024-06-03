@@ -27,6 +27,8 @@ class MultiDimensionalDiscreteSpace(Space):
 
     def element_to_index(self, element: tuple) -> int:
         if len(element) != self.dimension:
+            print("dimension expected: {}, got {}".format(self.dimension, len(element)))
+            print(element)
             raise ValueError('Bad length of element')
 
         index = 0

@@ -10,8 +10,8 @@ import pandas as pd
 import seaborn as sns
 
 from blockchain_mdps import *
-from blockchain_mdps.ethereum2_fee_model import EthereumFeeModel
-from blockchain_mdps.ethereum2_model import Ethereum2Model
+from blockchain_mdps.eth2_fee_model import Eth2FeeModel
+from blockchain_mdps.eth2_model import Eth2Model
 from reinforcement_learning import *
 # noinspection PyUnusedLocal
 from reinforcement_learning.base.training.callbacks.bva_callback import BVACallback
@@ -242,18 +242,13 @@ def run_mcts_fees(args: argparse.Namespace):
     max_fork = args.max_fork
     fee = args.fee
     transaction_chance = args.delta
-
-    # 'gamma', 'fee', 'transaction_chance', 'max_pool', and 'shard_count'
-
     # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
-    # simple_mdp = Ethereum2Model(alpha=alpha, max_fork=max_fork)
-    simple_mdp = EthereumFeeModel(alpha=alpha, gamma=gamma, fee=fee,
-                                  transaction_chance=transaction_chance,
-                                  max_pool=max_fork, max_fork=max_fork,
-                                  shard_count=max_fork)
+    simple_mdp = Eth2Model(alpha=alpha, gamma=gamma, max_fork=max_fork)
     rev, _ = solve_mdp_exactly(simple_mdp)
-    mdp = BitcoinFeeModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
-                          max_pool=max_fork)
+    # mdp = BitcoinFeeModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
+    #                       max_pool=max_fork)
+    mdp = Eth2FeeModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
+                       max_pool=max_fork)
     # mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     smart_init = rev * (1 + fee * transaction_chance)
     # smart_init = None
@@ -287,10 +282,8 @@ if __name__ == '__main__':
     parser.add_argument('--bind_all', help='pass bind_all to tensorboard', action='store_true')
     parser.add_argument('--load_experiment', help='name of experiment to continue', default=None)
     parser.add_argument('--alpha', help='miner size', default=0.35, type=float)
-    # parser.add_argument('--alpha', help='number of shards', default=35, type=float)
     parser.add_argument('--gamma', help='rushing factor', default=0.5, type=float)
     parser.add_argument('--max_fork', help='maximal fork size', default=10, type=int)
-    # parser.add_argument('--max_fork', help='maximal validator size per shard', default=20, type=int)
     parser.add_argument('--fee', help='transaction fee', default=10, type=float)
     parser.add_argument('--delta', help='chance for a transaction', default=0.01, type=float)
     parser.add_argument('--seed', help='random seed', default=0, type=int)
