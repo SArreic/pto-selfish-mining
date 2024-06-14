@@ -197,6 +197,7 @@ class MCTSAgent(BVAAgent):
             node.mc_estimated_q_values[action] = sampled_action_value
         else:
             action_count = node.action_counts[action]
+            # print(action_count)
             node.mc_estimated_q_values[action] *= (action_count - 1) / action_count
             node.mc_estimated_q_values[action] += sampled_action_value / action_count
 

@@ -23,7 +23,7 @@ class Eth2FeeModel(BlockchainModel):
         self.block_reward = 1
 
         self.Fork = self.create_int_enum('Fork', ['Irrelevant', 'Relevant', 'Active'])
-        self.Action = self.create_int_enum('Action', ['Illegal', 'Propose', 'Attest', 'Slash', 'Wait'])
+        self.Action = self.create_int_enum('Action', ['Illegal', 'Propose', 'Attest', 'Slash'])
         self.Block = self.create_int_enum('Block', ['NoBlock', 'Exists'])
         self.Transaction = self.create_int_enum('Transaction', ['NoTransaction', 'With'])
 
