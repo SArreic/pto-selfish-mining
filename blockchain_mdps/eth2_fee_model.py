@@ -23,7 +23,7 @@ class Eth2FeeModel(BlockchainModel):
         self.block_reward = 1
 
         self.Fork = self.create_int_enum('Fork', ['Irrelevant', 'Relevant', 'Active'])
-        self.Action = self.create_int_enum('Action', ['Illegal', 'Propose', 'Attest', 'Slash'])
+        self.Action = self.create_int_enum('Action', ['Illegal', 'Propose', 'Vote', 'Attest'])
         self.Block = self.create_int_enum('Block', ['NoBlock', 'Exists'])
         self.Transaction = self.create_int_enum('Transaction', ['NoTransaction', 'With'])
 
@@ -178,7 +178,7 @@ class Eth2FeeModel(BlockchainModel):
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
-        if action_type is self.Action.Slash:
+        if action_type is self.Action.Attest:
             if length_h < action_param <= length_a:
                 accepted_transactions = self.chain_transactions(self.truncate_chain(a, action_param))
                 next_state = self.shift_back(a, action_param) + self.create_empty_chain() \
@@ -195,7 +195,7 @@ class Eth2FeeModel(BlockchainModel):
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
-        if action_type is self.Action.Attest:
+        if action_type is self.Action.Vote:
             if fork is not self.Fork.Active and length_a < self.max_fork \
                     and length_h < self.max_fork \
                     and action_param in [self.Transaction.With, self.Transaction.NoTransaction]:

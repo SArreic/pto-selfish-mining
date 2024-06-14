@@ -20,7 +20,7 @@ class Eth2Model(BlockchainModel):
 
         self.Fork = self.create_int_enum('Fork', ['Irrelevant', 'Relevant', 'Active'])
         self.Action = self.create_int_enum('Action',
-                                           ['Illegal', 'Propose', 'Attest', 'Slash', 'Wait'])
+                                           ['Illegal', 'Propose', 'Attest', 'Vote', 'Wait'])
 
         super().__init__()
 
@@ -71,7 +71,7 @@ class Eth2Model(BlockchainModel):
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
-        if action is self.Action.Slash:
+        if action is self.Action.Vote:
             if 0 < h <= a < self.max_fork and fork is self.Fork.Relevant:
                 next_state = a, h, self.Fork.Active
                 transitions.add(next_state, probability=1)
