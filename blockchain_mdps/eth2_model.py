@@ -57,29 +57,46 @@ class Eth2Model(BlockchainModel):
         if action is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
 
-        elif action is self.Action.Propose:
-            if a + 1 <= self.max_fork:
-                next_state = a + 1, h, self.Fork.Relevant
+        if action is self.Action.Propose:
+            if h > 0:
+                next_state = 0, 0, self.Fork.Irrelevant
+                transitions.add(next_state, probability=1, difficulty_contribution=h)
+            else:
+                transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+
+        if action is self.Action.Attest:
+            if a > h:
+                next_state = a - h - 1, 0, self.Fork.Irrelevant
+                transitions.add(next_state, probability=1, reward=h + 1, difficulty_contribution=h + 1)
+            else:
+                transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+
+        if action is self.Action.Slash:
+            if 0 < h <= a < self.max_fork and fork is self.Fork.Relevant:
+                next_state = a, h, self.Fork.Active
                 transitions.add(next_state, probability=1)
             else:
-                transitions.add(state, probability=1, reward=self.error_penalty)
+                transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
-        elif action is self.Action.Attest:
-            if h + 1 <= self.max_fork:
-                next_state = a, h + 1, self.Fork.Relevant
-                transitions.add(next_state, probability=1)
+        if action is self.Action.Wait:
+            if fork is not self.Fork.Active and a < self.max_fork and h < self.max_fork:
+                attacker_block = a + 1, h, self.Fork.Irrelevant
+                transitions.add(attacker_block, probability=self.alpha)
+
+                honest_block = a, h + 1, self.Fork.Relevant
+                transitions.add(honest_block, probability=1 - self.alpha)
+            elif fork is self.Fork.Active and 0 < h <= a < self.max_fork:
+                attacker_block = a + 1, h, self.Fork.Active
+                transitions.add(attacker_block, probability=self.alpha)
+
+                honest_support_block = a - h, 1, self.Fork.Relevant
+                transitions.add(honest_support_block, probability=self.gamma * (1 - self.alpha), reward=h,
+                                difficulty_contribution=h)
+
+                honest_adversary_block = a, h + 1, self.Fork.Relevant
+                transitions.add(honest_adversary_block, probability=(1 - self.gamma) * (1 - self.alpha))
             else:
-                transitions.add(state, probability=1, reward=self.error_penalty)
-
-        elif action == self.Action.Slash:
-            if fork == self.Fork.Active:
-                new_state = self.get_final_state()
-                transitions.add(new_state, probability=1)
-            else:
-                transitions.add(state, probability=1, reward=self.error_penalty)
-
-        elif action == self.Action.Wait:
-            transitions.add(state, probability=1)
+                transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
         return transitions
 

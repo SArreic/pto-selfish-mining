@@ -167,34 +167,134 @@ class Eth2FeeModel(BlockchainModel):
         if action_type is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
 
-        else:
-            if action_type is self.Action.Propose:
-                new_block = self.propose_block(state, action_param)
-                if self.is_chain_valid(new_block):
-                    new_state = self.apply_block(state, new_block)
-                    reward = self.block_reward + (self.fee if action_param == self.Transaction.With else 0)
-                    transitions.add(new_state, probability=1, reward=reward)
-                else:
-                    transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+        if action_type is self.Action.Propose:
+            if 0 < action_param <= length_h:
+                accepted_transactions = self.chain_transactions(self.truncate_chain(h, action_param))
+                next_state = self.create_empty_chain() + self.shift_back(h, action_param) \
+                             + (self.Fork.Irrelevant, pool - accepted_transactions,
+                                0, length_h - action_param,
+                                0, transactions_h - accepted_transactions)
+                transitions.add(next_state, probability=1, difficulty_contribution=action_param)
+            else:
+                transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
-            elif action_type is self.Action.Attest:
-                if self.is_valid_attestation(state, action_param):
-                    new_state = self.apply_attestation(state, action_param)
-                    reward = self.block_reward / 2
-                    transitions.add(new_state, probability=1, reward=reward)
-                else:
-                    transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+        if action_type is self.Action.Slash:
+            if length_h < action_param <= length_a:
+                accepted_transactions = self.chain_transactions(self.truncate_chain(a, action_param))
+                next_state = self.shift_back(a, action_param) + self.create_empty_chain() \
+                             + (self.Fork.Irrelevant, pool - accepted_transactions,
+                                length_a - action_param, 0,
+                                transactions_a - accepted_transactions, 0)
+                reward = (action_param + accepted_transactions * self.fee) * self.block_reward
+                transitions.add(next_state, probability=1, reward=reward, difficulty_contribution=action_param)
 
-            elif action_type is self.Action.Slash:
-                if self.is_slashable(state, action_param):
-                    new_state = self.apply_slash(state, action_param)
-                    reward = self.block_reward / 2
-                    transitions.add(new_state, probability=1, reward=reward)
-                else:
-                    transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+            elif 0 < length_h == action_param <= length_a < self.max_fork \
+                    and fork is self.Fork.Relevant:
+                next_state = a + h + (self.Fork.Active, pool, length_a, length_h, transactions_a, transactions_h)
+                transitions.add(next_state, probability=1)
+            else:
+                transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
-            elif action_type is self.Action.Wait:
-                transitions.add(state, probability=1, reward=0)
+        if action_type is self.Action.Attest:
+            if fork is not self.Fork.Active and length_a < self.max_fork \
+                    and length_h < self.max_fork \
+                    and action_param in [self.Transaction.With, self.Transaction.NoTransaction]:
+                new_transaction_chance = self.transaction_chance if length_a >= length_h else 0
+
+                add_transaction = action_param == self.Transaction.With and transactions_a < pool
+                attacker_block_no_new_transaction = self.add_block(a, add_transaction) + h \
+                                                    + (self.Fork.Irrelevant, pool,
+                                                       length_a + 1, length_h,
+                                                       transactions_a + int(add_transaction), transactions_h)
+                transitions.add(attacker_block_no_new_transaction,
+                                probability=self.alpha * (1 - new_transaction_chance))
+
+                attacker_block_new_transaction = self.add_block(a, add_transaction) + h \
+                                                 + (self.Fork.Irrelevant, min(self.max_pool, pool + 1),
+                                                    length_a + 1, length_h,
+                                                    transactions_a + int(add_transaction), transactions_h)
+                transitions.add(attacker_block_new_transaction, probability=self.alpha * new_transaction_chance,
+                                allow_merging=True)
+
+                new_transaction_chance = self.transaction_chance if length_a <= length_h else 0
+
+                add_transaction = transactions_h < pool
+                honest_block_no_new_transaction = a + self.add_block(h, add_transaction) \
+                                                  + (self.Fork.Relevant, pool,
+                                                     length_a, length_h + 1,
+                                                     transactions_a, transactions_h + int(add_transaction))
+                transitions.add(honest_block_no_new_transaction,
+                                probability=(1 - self.alpha) * (1 - new_transaction_chance))
+
+                honest_block_new_transaction = a + self.add_block(h, add_transaction) \
+                                               + (self.Fork.Relevant, min(self.max_pool, pool + 1),
+                                                  length_a, length_h + 1,
+                                                  transactions_a, transactions_h + int(add_transaction))
+                transitions.add(honest_block_new_transaction, probability=(1 - self.alpha) * new_transaction_chance,
+                                allow_merging=True)
+
+            elif fork is self.Fork.Active and 0 < length_h <= length_a < self.max_fork \
+                    and action_param in [self.Transaction.With, self.Transaction.NoTransaction]:
+                add_transaction = action_param == self.Transaction.With and transactions_a < pool
+                attacker_block_no_new_transaction = self.add_block(a, add_transaction) + h \
+                                                    + (self.Fork.Active, pool,
+                                                       length_a + 1, length_h,
+                                                       transactions_a + int(add_transaction), transactions_h)
+                transitions.add(attacker_block_no_new_transaction,
+                                probability=self.alpha * (1 - self.transaction_chance))
+
+                attacker_block_new_transaction = self.add_block(a, add_transaction) + h \
+                                                 + (self.Fork.Active, min(self.max_pool, pool + 1),
+                                                    length_a + 1, length_h,
+                                                    transactions_a + int(add_transaction), transactions_h)
+                transitions.add(attacker_block_new_transaction, probability=self.alpha * self.transaction_chance,
+                                allow_merging=True)
+
+                accepted_blocks = length_h
+                accepted_transactions = self.chain_transactions(self.truncate_chain(a, accepted_blocks))
+                reward = (accepted_blocks + accepted_transactions * self.fee) * self.block_reward
+
+                new_transaction_chance = self.transaction_chance if length_a == length_h else 0
+                add_transaction = accepted_transactions < pool
+                honest_support_block_no_new_transaction = self.shift_back(a, accepted_blocks) \
+                                                          + self.add_block(self.create_empty_chain(), add_transaction) \
+                                                          + (self.Fork.Relevant, pool - accepted_transactions,
+                                                             length_a - accepted_blocks, 1,
+                                                             transactions_a - accepted_transactions,
+                                                             int(add_transaction))
+                transitions.add(honest_support_block_no_new_transaction,
+                                probability=self.gamma * (1 - self.alpha) * (1 - new_transaction_chance),
+                                reward=reward, difficulty_contribution=accepted_blocks)
+
+                honest_support_block_new_transaction = self.shift_back(a, accepted_blocks) \
+                                                       + self.add_block(self.create_empty_chain(), add_transaction) \
+                                                       + (self.Fork.Relevant,
+                                                          min(pool - accepted_transactions + 1, self.max_pool),
+                                                          length_a - accepted_blocks, 1,
+                                                          transactions_a - accepted_transactions,
+                                                          int(add_transaction))
+                transitions.add(honest_support_block_new_transaction,
+                                probability=self.gamma * (1 - self.alpha) * new_transaction_chance,
+                                reward=reward, difficulty_contribution=accepted_blocks, allow_merging=True)
+
+                add_transaction = transactions_h < pool
+                honest_adversary_block_no_new_transaction = a + self.add_block(h, add_transaction) \
+                                                            + (self.Fork.Relevant, pool,
+                                                               length_a, length_h + 1,
+                                                               transactions_a, transactions_h + int(add_transaction))
+                transitions.add(honest_adversary_block_no_new_transaction,
+                                probability=(1 - self.gamma) * (1 - self.alpha) * (1 - new_transaction_chance),
+                                allow_merging=True)
+
+                honest_adversary_block_new_transaction = a + self.add_block(h, add_transaction) \
+                                                         + (self.Fork.Relevant, min(self.max_pool, pool + 1),
+                                                            length_a, length_h + 1,
+                                                            transactions_a, transactions_h + int(add_transaction))
+                transitions.add(honest_adversary_block_new_transaction,
+                                probability=(1 - self.gamma) * (1 - self.alpha) * new_transaction_chance,
+                                allow_merging=True)
+            else:
+                transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
         return transitions
 
