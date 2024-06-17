@@ -250,29 +250,17 @@ def run_mcts_fees(args: argparse.Namespace):
     # smart_init = None
     print(f'{mdp.state_space.size:,}')
 
-    # trainer = MCTSTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info,
-    #                       output_root=args.output_root, output_profile=False, output_memory_snapshots=False,
-    #                       random_seed=args.seed, expected_horizon=10_000, depth=5, batch_size=100, dropout=0,
-    #                       length_factor=10, starting_epsilon=0.05, epsilon_step=0, bva_smart_init=smart_init,
-    #                       prune_tree_rate=250, num_of_episodes_for_average=1000, learning_rate=args.lr,
-    #                       nn_factor=0.0001, mc_simulations=25, num_of_epochs=5001, epoch_shuffles=2, save_rate=100,
-    #                       use_base_approximation=True, ground_initial_state=False,
-    #                       train_episode_length=100, evaluate_episode_length=100, lr_decay_epoch=1000,
-    #                       number_of_training_agents=args.train_agents, number_of_evaluation_agents=args.eval_agents,
-    #                       lower_priority=args.no_bg, bind_all=args.bind_all, load_experiment=args.load_experiment,
-    #                       output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
-
-    trainer = SACTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info,
-                         output_root=args.output_root, output_profile=False, output_memory_snapshots=False,
-                         random_seed=args.seed, expected_horizon=10_000, depth=5, batch_size=100, dropout=0,
-                         length_factor=10, starting_epsilon=0.05, epsilon_step=0, bva_smart_init=smart_init,
-                         prune_tree_rate=250, num_of_episodes_for_average=1000, learning_rate=args.lr,
-                         nn_factor=0.0001, mc_simulations=25, num_of_epochs=5001, epoch_shuffles=2, save_rate=100,
-                         use_base_approximation=True, ground_initial_state=False,
-                         train_episode_length=100, evaluate_episode_length=100, lr_decay_epoch=1000,
-                         number_of_training_agents=args.train_agents, number_of_evaluation_agents=args.eval_agents,
-                         lower_priority=args.no_bg, bind_all=args.bind_all, load_experiment=args.load_experiment,
-                         output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
+    trainer = MCTSTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info,
+                          output_root=args.output_root, output_profile=False, output_memory_snapshots=False,
+                          random_seed=args.seed, expected_horizon=10_000, depth=5, batch_size=100, dropout=0,
+                          length_factor=10, starting_epsilon=0.05, epsilon_step=0, bva_smart_init=smart_init,
+                          prune_tree_rate=250, num_of_episodes_for_average=1000, learning_rate=args.lr,
+                          nn_factor=0.0001, mc_simulations=25, num_of_epochs=5001, epoch_shuffles=2, save_rate=100,
+                          use_base_approximation=True, ground_initial_state=False,
+                          train_episode_length=100, evaluate_episode_length=100, lr_decay_epoch=1000,
+                          number_of_training_agents=args.train_agents, number_of_evaluation_agents=args.eval_agents,
+                          lower_priority=args.no_bg, bind_all=args.bind_all, load_experiment=args.load_experiment,
+                          output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
 
     trainer.run()
 
