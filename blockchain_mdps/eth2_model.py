@@ -124,6 +124,47 @@ class Eth2Model(BlockchainModel):
             policy[i] = action
 
         return tuple(policy)
+    
+    def build_malicious_policy(self) -> BlockchainModel.Policy:
+        policy = np.zeros(self.state_space.size, dtype=int)
+
+        for i in range(self.state_space.size):
+            a, h, fork = self.state_space.index_to_element(i)
+
+            if fork == self.Fork.Active:
+                if h < a:
+                    action = self.Action.Attest
+                else:
+                    action = self.Action.Wait
+            elif fork == self.Fork.Relevant:
+                if h > 0 and a > h:
+                    action = self.Action.Attest
+                elif a > 0:
+                    if h == 0:
+                        action = self.Action.Propose
+                    elif h > a / 2:
+                        action = self.Action.Vote
+                    else:
+                        action = self.Action.Wait
+                else:
+                    action = self.Action.Wait
+            else:  # fork == self.Fork.Irrelevant
+                if h > a:
+                    action = self.Action.Attest
+                elif a > 0:
+                    if h == 0:
+                        action = self.Action.Propose
+                    elif h > a / 2:
+                        action = self.Action.Vote
+                    else:
+                        action = self.Action.Wait
+                else:
+                    action = self.Action.Wait
+
+            policy[i] = action
+
+        return tuple(policy)
+
 
     def build_test_policy(self) -> BlockchainModel.Policy:
         policy = np.zeros(self.state_space.size, dtype=int)
