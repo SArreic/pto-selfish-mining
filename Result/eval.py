@@ -64,8 +64,13 @@ def compare_files(file_paths):
         plt.legend()
         plt.grid(True)
 
-        plt.xticks(ticks=range(0, len(values), max(1, len(values) // 10)))
-        plt.yticks(ticks=range(int(min(values)), int(max(values)), max(1, (int(max(values)) - int(min(values))) // 10)))
+        # Set the xticks and yticks as specified
+        max_x = len(values)
+        plt.xticks(ticks=range(0, max_x, 500))
+        plt.yticks(ticks=[i * 0.1 for i in range(0, int(5000 / 0.1) + 1)])
+        plt.xlim(0, 4000)  # Set the x-axis limit
+        plt.ylim(0, 0.5)
+
         plt.tight_layout()
 
         print(f"File: {file_path}")
@@ -76,5 +81,5 @@ def compare_files(file_paths):
     plt.show()
 
 
-file_paths = ['sac_res.txt', 'dqn_res.txt']
+file_paths = ['sac_res.txt']
 compare_files(file_paths)
