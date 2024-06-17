@@ -131,35 +131,52 @@ class Eth2Model(BlockchainModel):
         for i in range(self.state_space.size):
             a, h, fork = self.state_space.index_to_element(i)
 
-            if fork == self.Fork.Active:
-                if h < a:
-                    action = self.Action.Attest
+            # Initialize two parallel chains (left chain and right chain)
+            left_chain_active = False
+            right_chain_active = False
+
+            # Phase 1: Start two parallel chains and keep them private
+            if a == 0 and h == 0:
+                if fork == self.Fork.Irrelevant:
+                    action = self.Action.Propose  
+                    left_chain_active = True
+                elif fork == self.Fork.Relevant:
+                    action = self.Action.Propose  
+                    right_chain_active = True
                 else:
                     action = self.Action.Wait
-            elif fork == self.Fork.Relevant:
-                if h > 0 and a > h:
-                    action = self.Action.Attest
-                elif a > 0:
-                    if h == 0:
-                        action = self.Action.Propose
-                    elif h > a / 2:
-                        action = self.Action.Vote
+
+            # Phase 2: Repeat voting on left and right chains
+            elif a > 0 and h > 0:
+                if left_chain_active and right_chain_active:
+                    action = self.Action.Vote  
+
+                    action = self.Action.Vote 
+                elif right_chain_active:
+                    action = self.Action.Vote  
+                else:
+                    action = self.Action.Wait
+
+            # Phase 3: Propose new blocks on left or right chain
+            elif a > 0:
+                if left_chain_active:
+                    if fork == self.Fork.Relevant:
+                        action = self.Action.Propose  
                     else:
+                        action = self.Action.Wait
+                elif right_chain_active:
+                    if fork == self.Fork.Relevant:
+                        action = self.Action.Propose  
                         action = self.Action.Wait
                 else:
                     action = self.Action.Wait
-            else:  # fork == self.Fork.Irrelevant
-                if h > a:
-                    action = self.Action.Attest
-                elif a > 0:
-                    if h == 0:
-                        action = self.Action.Propose
-                    elif h > a / 2:
-                        action = self.Action.Vote
-                    else:
-                        action = self.Action.Wait
+
+            # Synchronize or delay release of votes
+            if a > 0 and h > 0:
+                if self.gamma > 0.5:
+                    action = self.Action.Attest 
                 else:
-                    action = self.Action.Wait
+                    action = self.Action.Wait  
 
             policy[i] = action
 
