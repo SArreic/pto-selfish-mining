@@ -234,6 +234,9 @@ class EthereumModel(BlockchainModel):
 
         return tuple(policy)
 
+    def get_honest_revenue(self) -> float:
+        return self.alpha
+
 
 if __name__ == '__main__':
     print('ethereum_mdp module test')

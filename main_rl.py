@@ -241,7 +241,8 @@ def run_mcts_fees(args: argparse.Namespace):
     max_fork = args.max_fork
     fee = args.fee
     transaction_chance = args.delta
-    simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
+    # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
+    simple_mdp = EthereumModel(alpha=alpha, max_fork=max_fork)
     rev, _ = solve_mdp_exactly(simple_mdp)
     mdp = BitcoinFeeModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
                           max_pool=max_fork)

@@ -98,6 +98,42 @@ class Ethereum2Model(BlockchainModel):
     def get_honest_revenue(self) -> float:
         return self.alpha
 
+    def build_honest_policy(self) -> BlockchainModel.Policy:
+        policy = np.zeros(self.state_space.size, dtype=int)
+
+        for i in range(self.state_space.size):
+            proposals, votes, validator_state, stake_pool = self.state_space.index_to_element(i)
+
+            if proposals > votes:
+                action = self.Action.Propose
+            elif votes > proposals:
+                action = self.Action.Vote
+            else:
+                action = self.Action.Wait
+
+            policy[i] = action
+
+        return tuple(policy)
+
+    def build_attack_policy(self) -> BlockchainModel.Policy:
+        policy = np.zeros(self.state_space.size, dtype=int)
+
+        for i in range(self.state_space.size):
+            proposals, votes, validator_state, stake_pool = self.state_space.index_to_element(i)
+
+            if proposals > votes + 1:
+                action = self.Action.Propose
+            elif (votes == proposals - 1 and proposals >= 2) or proposals == self.max_proposals:
+                action = self.Action.Vote
+            elif (votes == 1 and proposals == 1) and validator_state is self.Validator.Active:
+                action = self.Action.Attest
+            else:
+                action = self.Action.Wait
+
+            policy[i] = action
+
+        return tuple(policy)
+
 
 if __name__ == '__main__':
     print('ethereum_model module test')

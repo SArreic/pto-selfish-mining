@@ -9,10 +9,17 @@ def extract_value_from_line(line, keyword):
             start_index = line.index(keyword) + len(keyword) + 2
             end_index = line.index(',', start_index) if ',' in line[start_index:] else line.index('\n', start_index)
             value = line[start_index:end_index].strip()
+
+            if '±' in value:
+                mean_value, error_value = value.split('±')
+                return float(mean_value), float(error_value)
+
             if value.startswith('{'):
                 return json.loads(value)
+
             if value.replace('.', '', 1).isdigit():
                 return float(value) if '.' in value else int(value)
+
             return value
         except ValueError as e:
             print(f"Error extracting value for {keyword}: {e}")
@@ -32,9 +39,34 @@ def process_file(file_path):
         for line in file:
             for keyword in metrics:
                 value = extract_value_from_line(line, keyword)
-                if value is not None and isinstance(value, (int, float)):
-                    metrics[keyword].append(value)
+                if value is not None:
+                    if isinstance(value, tuple):
+                        metrics[keyword].append(value[0])  # 只保存均值
+                    elif isinstance(value, (int, float)):
+                        metrics[keyword].append(value)
     return metrics
+
+
+def plot_comparison(all_stats, keyword):
+    plt.figure(figsize=(15, 10))
+    plt.title(f"Comparison of {keyword}")
+
+    for file_path, stats in all_stats:
+        values = stats[keyword]
+        if isinstance(values, list) and values:
+            if len(values) > 10:
+                subset_values = values[::10]
+                plt.plot(subset_values, label=f'{keyword} from {file_path}', marker='o', linestyle='-', markersize=4)
+            else:
+                plt.plot(values, label=f'{keyword} from {file_path}', marker='o', linestyle='-', markersize=4)
+
+    plt.xlabel('Data Points')
+    plt.ylabel('Values')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f'comparison_{keyword}.png', dpi=300)
+    plt.show()
 
 
 def compare_files(file_paths):
@@ -43,14 +75,18 @@ def compare_files(file_paths):
         stats = process_file(file_path)
         all_stats.append((file_path, stats))
 
-    plt.figure(figsize=(15, 10))
-
-    for index, (file_path, stats) in enumerate(all_stats, start=1):
-        plt.subplot(2, 1, index)
-        plt.title(f"Data from {file_path}")
-
+    # Iterate over each file and its corresponding stats
+    for file_path, stats in all_stats:
         for key, values in stats.items():
-            if isinstance(values, list):
+            if key == 'Simulated Policy Revenue':
+                print(f"File: {file_path}")
+                print(f"{key} Mean: {mean(values) if values else 'N/A'}")
+                continue  # Skip plotting for Simulated Policy Revenue
+
+            plt.figure(figsize=(15, 10))
+            plt.title(f"{key} Data from {file_path}")
+
+            if isinstance(values, list) and values:
                 if len(values) > 10:
                     subset_values = values[::10]
                     plt.plot(subset_values, label=key, marker='o', linestyle='-', markersize=4)
@@ -59,27 +95,36 @@ def compare_files(file_paths):
             else:
                 plt.plot([values], label=key, marker='o', linestyle='-', markersize=4)
 
-        plt.xlabel('Data Points')
-        plt.ylabel('Values')
-        plt.legend()
-        plt.grid(True)
+            plt.xlabel('Data Points')
+            plt.ylabel('Values')
+            plt.legend()
+            plt.grid(True)
 
-        # Set the xticks and yticks as specified
-        max_x = len(values)
-        plt.xticks(ticks=range(0, max_x, 500))
-        plt.yticks(ticks=[i * 0.1 for i in range(0, int(5000 / 0.1) + 1)])
-        plt.xlim(0, 4000)  # Set the x-axis limit
-        plt.ylim(0, 0.5)
+            # Set the xticks and yticks as specified
+            max_x = len(values)
+            if key == 'Test Policy Revenue':
+                plt.xticks(ticks=range(0, 501, 50))
+                plt.yticks(ticks=[i * 0.2 for i in range(0, int(1 / 0.2) + 1)])
+                plt.xlim(0, 500)  # Set the x-axis limit for Test Policy Revenue
+                plt.ylim(0, 1)  # Set the y-axis limit for Test Policy Revenue
+            else:
+                plt.xticks(ticks=range(0, max_x, 500))
+                plt.yticks(ticks=[i * 0.1 for i in range(0, int(5000 / 0.1) + 1)])
+                plt.xlim(0, 4000)  # Set the x-axis limit
+                plt.ylim(0, 0.5)
 
-        plt.tight_layout()
+            plt.tight_layout()
 
-        print(f"File: {file_path}")
-        for key, values in stats.items():
+            plt.savefig(f'chart_{file_path}_{key}.png', dpi=300)
+            plt.show()
+
+            print(f"File: {file_path}")
             print(f"{key} Mean: {mean(values) if values else 'N/A'}")
 
-    plt.savefig('chart.png', dpi=300)
-    plt.show()
+    # Plot comparisons for Agent Base Value Approximation and Base Value Approximation
+    plot_comparison(all_stats, 'Agent Base Value Approximation')
+    plot_comparison(all_stats, 'Base Value Approximation')
 
 
-file_paths = ['sac_res.txt']
+file_paths = ['btc_res.txt', 'eth_res.txt']
 compare_files(file_paths)
