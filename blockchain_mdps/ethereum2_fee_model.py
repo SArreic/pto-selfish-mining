@@ -51,14 +51,21 @@ class Ethereum2FeeModel(BlockchainModel):
         return MultiDimensionalDiscreteSpace(self.Action, (0, self.max_proposals))
 
     def get_initial_state(self) -> BlockchainModel.State:
-        return (self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals + (
+        initial_state = (self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals * 2 + (
             self.Validator.Active, 0, 0, 0, 0)
+        # print(f"Debug: initial_state_length={len(initial_state)}, expected_length={4 * self.max_proposals + 5}")
+        return initial_state
 
     def get_final_state(self) -> BlockchainModel.State:
-        return (self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals + (
+        final_state = (self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals * 2 + (
             self.Validator.Slashed, -1, -1, -1, -1)
+        # print(f"Debug: final_state_length={len(final_state)}, expected_length={4 * self.max_proposals + 5}")
+        return final_state
 
     def dissect_state(self, state: BlockchainModel.State) -> Tuple[tuple, tuple, Enum, int, int, int, int]:
+        # print(f"Debug: max_proposals={self.max_proposals}")
+        # print(f"Debug: state_length={len(state)}, expected_length={4 * self.max_proposals + 5}")
+
         if len(state) != 4 * self.max_proposals + 5:
             raise ValueError(f"State length {len(state)} does not match expected {4 * self.max_proposals + 5}")
 
@@ -76,18 +83,38 @@ class Ethereum2FeeModel(BlockchainModel):
         blocks, transactions, validator_state, stake_pool, pool, fee_pool, congestion = self.dissect_state(state)
         index = sum(1 for block in blocks if block is self.Block.Exists)
         new_blocks = list(blocks)
+        expected_blocks_length = self.max_proposals * 4
+
+        if len(new_blocks) < expected_blocks_length:
+            additional_blocks_needed = (expected_blocks_length - len(new_blocks)) // 2
+            new_blocks.extend([self.Block.NoBlock, self.Transaction.NoTransaction] * additional_blocks_needed)
+
         new_blocks[2 * index] = self.Block.Exists
         new_blocks[2 * index + 1] = self.Transaction.NoTransaction
-        return tuple(new_blocks) + (validator_state, stake_pool, pool, fee_pool, congestion)
+
+        new_state = tuple(new_blocks) + (validator_state, stake_pool, pool, fee_pool, congestion)
+
+        # print(f"Length of new_state: {len(new_state)} and new_blocks: {len(new_blocks)}")
+        # print(f"Debug: new_state_after_add_proposal={new_state}, new_state_length={len(new_state)}")
+
+        return new_state
 
     def add_vote(self, state: BlockchainModel.State, proposal_index: int) -> BlockchainModel.State:
         blocks, transactions, validator_state, stake_pool, pool, fee_pool, congestion = self.dissect_state(state)
+        if proposal_index < 0 or proposal_index > self.max_proposals:
+            print(proposal_index, " is not a valid proposal index")
+            print("Valid proposal indexes are from {} to {}".format(0, self.max_proposals))
+            raise ValueError(f"Invalid proposal_index: {proposal_index}")
         index = sum(1 for block in blocks if block is self.Block.Exists)
-        if index >= proposal_index:
-            return state  # Invalid vote if trying to vote on non-existing proposal
+        if index <= proposal_index:
+            return state
         new_transactions = list(transactions)
+        while len(new_transactions) <= 2 * proposal_index:
+            new_transactions.append(self.Transaction.NoTransaction)
         new_transactions[2 * proposal_index] = self.Transaction.WithTransaction
-        return blocks + tuple(new_transactions) + (validator_state, stake_pool, pool, fee_pool, congestion)
+        new_state = blocks + tuple(new_transactions) + (validator_state, stake_pool, pool, fee_pool, congestion)
+        # print(f"Debug: new_state_after_add_vote={new_state}, new_state_length={len(new_state)}")
+        return new_state
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:

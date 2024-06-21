@@ -247,7 +247,7 @@ def run_mcts_fees(args: argparse.Namespace):
 
     simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_votes=max_fork, max_proposals=max_fork,
                                 max_stake_pool=max_fork)
-
+    rev, _ = solve_mdp_exactly(simple_mdp)
     mdp = Ethereum2FeeModel(alpha=alpha, gamma=gamma, max_pool=max_fork,
                             max_fee_pool=max_fork, max_proposals=max_fork,
                             max_stake_pool=max_fork, max_votes=max_fork,

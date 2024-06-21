@@ -50,6 +50,8 @@ class Ethereum2Model(BlockchainModel):
         votes = state[1]
         validator_state = state[2]
         stake_pool = state[3]
+        # print( f'Dissecting state: proposals={proposals}, votes={votes}, validator_state={validator_state},
+        # stake_pool={stake_pool}')
         return proposals, votes, validator_state, stake_pool
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
@@ -71,17 +73,17 @@ class Ethereum2Model(BlockchainModel):
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
 
         if action_type is self.Action.Attest:
-            if validator_state == self.Validator.Active:
+            if validator_state == self.Validator.Active and votes < self.max_votes:
                 next_state = (proposals, votes + 1, validator_state, stake_pool)
                 transitions.add(next_state, probability=1)
 
         if action_type is self.Action.Propose:
-            if validator_state == self.Validator.Active:
+            if validator_state == self.Validator.Active and proposals < self.max_proposals:
                 next_state = (proposals + 1, votes, validator_state, stake_pool)
                 transitions.add(next_state, probability=1)
 
         if action_type is self.Action.Vote:
-            if validator_state == self.Validator.Active and action_param <= proposals:
+            if validator_state == self.Validator.Active and action_param <= proposals and votes < self.max_votes:
                 next_state = (proposals, votes + 1, validator_state, stake_pool)
                 transitions.add(next_state, probability=1)
 

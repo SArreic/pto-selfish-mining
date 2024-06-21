@@ -124,7 +124,7 @@ class Eth2Model(BlockchainModel):
             policy[i] = action
 
         return tuple(policy)
-    
+
     def build_malicious_policy(self) -> BlockchainModel.Policy:
         policy = np.zeros(self.state_space.size, dtype=int)
 
@@ -138,10 +138,10 @@ class Eth2Model(BlockchainModel):
             # Phase 1: Start two parallel chains and keep them private
             if a == 0 and h == 0:
                 if fork == self.Fork.Irrelevant:
-                    action = self.Action.Propose  
+                    action = self.Action.Propose
                     left_chain_active = True
                 elif fork == self.Fork.Relevant:
-                    action = self.Action.Propose  
+                    action = self.Action.Propose
                     right_chain_active = True
                 else:
                     action = self.Action.Wait
@@ -149,11 +149,11 @@ class Eth2Model(BlockchainModel):
             # Phase 2: Repeat voting on left and right chains
             elif a > 0 and h > 0:
                 if left_chain_active and right_chain_active:
-                    action = self.Action.Vote  
+                    action = self.Action.Vote
 
-                    action = self.Action.Vote 
+                    action = self.Action.Vote
                 elif right_chain_active:
-                    action = self.Action.Vote  
+                    action = self.Action.Vote
                 else:
                     action = self.Action.Wait
 
@@ -161,12 +161,12 @@ class Eth2Model(BlockchainModel):
             elif a > 0:
                 if left_chain_active:
                     if fork == self.Fork.Relevant:
-                        action = self.Action.Propose  
+                        action = self.Action.Propose
                     else:
                         action = self.Action.Wait
                 elif right_chain_active:
                     if fork == self.Fork.Relevant:
-                        action = self.Action.Propose  
+                        action = self.Action.Propose
                         action = self.Action.Wait
                 else:
                     action = self.Action.Wait
@@ -174,14 +174,13 @@ class Eth2Model(BlockchainModel):
             # Synchronize or delay release of votes
             if a > 0 and h > 0:
                 if self.gamma > 0.5:
-                    action = self.Action.Attest 
+                    action = self.Action.Attest
                 else:
-                    action = self.Action.Wait  
+                    action = self.Action.Wait
 
             policy[i] = action
 
         return tuple(policy)
-
 
     def build_test_policy(self) -> BlockchainModel.Policy:
         policy = np.zeros(self.state_space.size, dtype=int)
