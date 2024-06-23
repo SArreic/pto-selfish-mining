@@ -1,3 +1,4 @@
+import math
 import sys
 from enum import Enum
 from typing import Tuple
@@ -19,6 +20,11 @@ class Ethereum2Model(BlockchainModel):
         self.max_votes = max_votes
         self.max_stake_pool = max_stake_pool
 
+        # Define the rewards for different actions
+        self.propose_reward = 10  # Placeholder, set according to Ethereum 2.0 specifics
+        self.attest_reward = 5  # Placeholder, set according to Ethereum 2.0 specifics
+        self.vote_reward = 3  # Placeholder, set according to Ethereum 2.0 specifics
+
         self.Validator = self.create_int_enum('Validator', ['Active', 'Pending', 'Slashed'])
         self.Action = self.create_int_enum('Action', ['Illegal', 'Attest', 'Propose', 'Vote', 'Wait'])
 
@@ -33,11 +39,15 @@ class Ethereum2Model(BlockchainModel):
 
     def get_state_space(self) -> Space:
         elements = [(0, self.max_proposals), (0, self.max_votes), self.Validator, (0, self.max_stake_pool)]
+        print(f"Elements for state space: {elements}")
         underlying_space = MultiDimensionalDiscreteSpace(*elements)
+        print(f"Underlying space size: {underlying_space.size}")
         return DefaultValueSpace(underlying_space, self.get_final_state())
 
     def get_action_space(self) -> Space:
-        return MultiDimensionalDiscreteSpace(self.Action, (0, self.max_proposals))
+        action_space = MultiDimensionalDiscreteSpace(self.Action, (0, self.max_proposals))
+        print(f"Action space size: {action_space.size}")
+        return action_space
 
     def get_initial_state(self) -> BlockchainModel.State:
         return 0, 0, self.Validator.Active, 0
@@ -50,8 +60,6 @@ class Ethereum2Model(BlockchainModel):
         votes = state[1]
         validator_state = state[2]
         stake_pool = state[3]
-        # print( f'Dissecting state: proposals={proposals}, votes={votes}, validator_state={validator_state},
-        # stake_pool={stake_pool}')
         return proposals, votes, validator_state, stake_pool
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
@@ -71,25 +79,55 @@ class Ethereum2Model(BlockchainModel):
 
         if action_type is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
-
-        if action_type is self.Action.Attest:
+        elif action_type is self.Action.Attest:
             if validator_state == self.Validator.Active and votes < self.max_votes:
                 next_state = (proposals, votes + 1, validator_state, stake_pool)
-                transitions.add(next_state, probability=1)
-
-        if action_type is self.Action.Propose:
+                transitions.add(next_state, probability=1, reward=self.attest_reward)
+        elif action_type is self.Action.Propose:
             if validator_state == self.Validator.Active and proposals < self.max_proposals:
                 next_state = (proposals + 1, votes, validator_state, stake_pool)
-                transitions.add(next_state, probability=1)
-
-        if action_type is self.Action.Vote:
+                transitions.add(next_state, probability=1, reward=self.propose_reward)
+        elif action_type is self.Action.Vote:
             if validator_state == self.Validator.Active and action_param <= proposals and votes < self.max_votes:
                 next_state = (proposals, votes + 1, validator_state, stake_pool)
-                transitions.add(next_state, probability=1)
-
-        if action_type is self.Action.Wait:
+                transitions.add(next_state, probability=1, reward=self.vote_reward)
+        elif action_type is self.Action.Wait:
             next_state = state
-            transitions.add(next_state, probability=1)
+            transitions.add(next_state, probability=1, reward=0)  # No reward for waiting
+
+        # Ensure total transition probabilities sum to 1
+        total_prob = sum(transitions.probabilities.values())
+        if total_prob == 0:
+            num_transitions = len(transitions.probabilities)
+            if num_transitions == 0:
+                transitions.add((0, 0, self.Validator.Active, 0), probability=1)
+                total_prob = 1
+            else:
+                for key in transitions.probabilities.keys():
+                    transitions.probabilities[key] = 1 / num_transitions
+                total_prob = sum(transitions.probabilities.values())
+                if not math.isclose(total_prob, 1, abs_tol=1e-5):
+                    raise ValueError("Total transition probability does not sum to 1 after adjustment")
+
+        if not math.isclose(total_prob, 1, abs_tol=1e-5):
+            factor = 1 / total_prob
+            for key in transitions.probabilities.keys():
+                transitions.probabilities[key] *= factor
+            total_prob = sum(transitions.probabilities.values())
+            if not math.isclose(total_prob, 1, abs_tol=1e-5):
+                remaining_prob = 1 - total_prob
+                for key in transitions.probabilities.keys():
+                    if remaining_prob != 0:
+                        transitions.probabilities[key] += remaining_prob / len(transitions.probabilities)
+                        remaining_prob = 0
+                total_prob = sum(transitions.probabilities.values())
+                if not math.isclose(total_prob, 1, abs_tol=1e-5):
+                    raise ValueError("Total transition probability does not sum to 1 after adjustment")
+
+        min_difficulty = 1e-5
+        for key in transitions.difficulty_contributions.keys():
+            if transitions.difficulty_contributions[key] == 0:
+                transitions.difficulty_contributions[key] = min_difficulty
 
         return transitions
 
@@ -105,7 +143,6 @@ class Ethereum2Model(BlockchainModel):
 
         for i in range(self.state_space.size):
             proposals, votes, validator_state, stake_pool = self.state_space.index_to_element(i)
-
             if proposals > votes:
                 action = self.Action.Propose
             elif votes > proposals:
@@ -122,7 +159,6 @@ class Ethereum2Model(BlockchainModel):
 
         for i in range(self.state_space.size):
             proposals, votes, validator_state, stake_pool = self.state_space.index_to_element(i)
-
             if proposals > votes + 1:
                 action = self.Action.Propose
             elif (votes == proposals - 1 and proposals >= 2) or proposals == self.max_proposals:

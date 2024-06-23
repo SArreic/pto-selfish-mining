@@ -1,3 +1,4 @@
+import math
 import sys
 from enum import Enum
 from typing import Tuple
@@ -22,6 +23,11 @@ class Ethereum2FeeModel(BlockchainModel):
         self.max_pool = max_pool
         self.max_fee_pool = max_fee_pool
         self.network_congestion = network_congestion
+
+        # Define the rewards for different actions
+        self.propose_reward = 10  # Placeholder, set according to Ethereum 2.0 specifics
+        self.attest_reward = 5  # Placeholder, set according to Ethereum 2.0 specifics
+        self.vote_reward = 3  # Placeholder, set according to Ethereum 2.0 specifics
 
         self.Validator = self.create_int_enum('Validator', ['Active', 'Pending', 'Slashed'])
         self.Action = self.create_int_enum('Action', ['Illegal', 'Propose', 'Vote', 'Attest'])
@@ -53,19 +59,14 @@ class Ethereum2FeeModel(BlockchainModel):
     def get_initial_state(self) -> BlockchainModel.State:
         initial_state = (self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals * 2 + (
             self.Validator.Active, 0, 0, 0, 0)
-        # print(f"Debug: initial_state_length={len(initial_state)}, expected_length={4 * self.max_proposals + 5}")
         return initial_state
 
     def get_final_state(self) -> BlockchainModel.State:
         final_state = (self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals * 2 + (
             self.Validator.Slashed, -1, -1, -1, -1)
-        # print(f"Debug: final_state_length={len(final_state)}, expected_length={4 * self.max_proposals + 5}")
         return final_state
 
     def dissect_state(self, state: BlockchainModel.State) -> Tuple[tuple, tuple, Enum, int, int, int, int]:
-        # print(f"Debug: max_proposals={self.max_proposals}")
-        # print(f"Debug: state_length={len(state)}, expected_length={4 * self.max_proposals + 5}")
-
         if len(state) != 4 * self.max_proposals + 5:
             raise ValueError(f"State length {len(state)} does not match expected {4 * self.max_proposals + 5}")
 
@@ -94,16 +95,11 @@ class Ethereum2FeeModel(BlockchainModel):
 
         new_state = tuple(new_blocks) + (validator_state, stake_pool, pool, fee_pool, congestion)
 
-        # print(f"Length of new_state: {len(new_state)} and new_blocks: {len(new_blocks)}")
-        # print(f"Debug: new_state_after_add_proposal={new_state}, new_state_length={len(new_state)}")
-
         return new_state
 
     def add_vote(self, state: BlockchainModel.State, proposal_index: int) -> BlockchainModel.State:
         blocks, transactions, validator_state, stake_pool, pool, fee_pool, congestion = self.dissect_state(state)
         if proposal_index < 0 or proposal_index > self.max_proposals:
-            print(proposal_index, " is not a valid proposal index")
-            print("Valid proposal indexes are from {} to {}".format(0, self.max_proposals))
             raise ValueError(f"Invalid proposal_index: {proposal_index}")
         index = sum(1 for block in blocks if block is self.Block.Exists)
         if index <= proposal_index:
@@ -113,7 +109,6 @@ class Ethereum2FeeModel(BlockchainModel):
             new_transactions.append(self.Transaction.NoTransaction)
         new_transactions[2 * proposal_index] = self.Transaction.WithTransaction
         new_state = blocks + tuple(new_transactions) + (validator_state, stake_pool, pool, fee_pool, congestion)
-        # print(f"Debug: new_state_after_add_vote={new_state}, new_state_length={len(new_state)}")
         return new_state
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
@@ -133,21 +128,47 @@ class Ethereum2FeeModel(BlockchainModel):
 
         if action_type is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
-
-        if action_type is self.Action.Propose:
+        elif action_type is self.Action.Propose:
             if validator_state == self.Validator.Active:
                 next_state = self.add_proposal(state)
-                transitions.add(next_state, probability=1)
-
-        if action_type is self.Action.Vote:
+                transitions.add(next_state, probability=1, reward=self.propose_reward)
+        elif action_type is self.Action.Vote:
             if validator_state == self.Validator.Active and action_param <= self.max_proposals:
                 next_state = self.add_vote(state, action_param)
-                transitions.add(next_state, probability=1)
-
-        if action_type is self.Action.Attest:
+                transitions.add(next_state, probability=1, reward=self.vote_reward)
+        elif action_type is self.Action.Attest:
             if validator_state == self.Validator.Active:
                 next_state = state  # Placeholder for Attest action logic if needed
-                transitions.add(next_state, probability=1)
+                transitions.add(next_state, probability=1, reward=self.attest_reward)
+
+        # Ensure total transition probabilities sum to 1
+        total_prob = sum(transitions.probabilities.values())
+        if total_prob == 0:
+            num_transitions = len(transitions.probabilities)
+            if num_transitions == 0:
+                transitions.add((self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals * 2 + (
+                    self.Validator.Active, 0, 0, 0, 0), probability=1)
+                total_prob = 1
+            else:
+                for key in transitions.probabilities.keys():
+                    transitions.probabilities[key] = 1 / num_transitions
+                total_prob = sum(transitions.probabilities.values())
+                if not math.isclose(total_prob, 1, abs_tol=1e-5):
+                    raise ValueError("Total transition probability does not sum to 1 after adjustment")
+
+        if not math.isclose(total_prob, 1, abs_tol=1e-5):
+            factor = 1 / total_prob
+            for key in transitions.probabilities.keys():
+                transitions.probabilities[key] *= factor
+            total_prob = sum(transitions.probabilities.values())
+            if not math.isclose(total_prob, 1, abs_tol=1e-5):
+                remaining_prob = 1 - total_prob
+                for key in transitions.probabilities.keys():
+                    if remaining_prob != 0:
+                        transitions.probabilities[key] += remaining_prob / len(transitions.probabilities)
+                    total_prob = sum(transitions.probabilities.values())
+                    if not math.isclose(total_prob, 1, abs_tol=1e-5):
+                        raise ValueError("Total transition probability does not sum to 1 after adjustment")
 
         return transitions
 

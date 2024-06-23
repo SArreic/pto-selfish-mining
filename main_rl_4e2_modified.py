@@ -34,7 +34,10 @@ def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Poli
     solver = PTOSolver(mdp, expected_horizon=expected_horizon)
     p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10))
     sys.stdout.flush()
-    return np.float32(solver.mdp.calc_policy_revenue(p)), p
+    revenue = solver.mdp.calc_policy_revenue(p)
+    if np.iscomplex(revenue):
+        revenue = revenue.real  # 处理复数部分，仅取实数部分
+    return np.float32(revenue), p
 
 
 def log_solution_info(mdp: BlockchainModel, rev: float, trainer: Trainer) -> float:
@@ -244,16 +247,21 @@ def run_mcts_fees(args: argparse.Namespace):
     max_fork = args.max_fork
     fee = args.fee
     transaction_chance = args.delta
-
+    # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_votes=max_fork, max_proposals=max_fork,
                                 max_stake_pool=max_fork)
     rev, _ = solve_mdp_exactly(simple_mdp)
+    print("rev is ", rev)
+    rev = rev if 0 < rev < 1 else 0
     mdp = Ethereum2FeeModel(alpha=alpha, gamma=gamma, max_pool=max_fork,
                             max_fee_pool=max_fork, max_proposals=max_fork,
                             max_stake_pool=max_fork, max_votes=max_fork,
                             network_congestion=0)
 
-    smart_init = None
+    smart_init = rev * (1 + fee * transaction_chance)
+    print("rev is {}, fee is {}, transaction chance is {}".format(rev, fee, transaction_chance))
+    print("smart_init is {}".format(smart_init))
+    # smart_init = None
 
     print(f'{mdp.state_space.size:,}')
 

@@ -96,6 +96,11 @@ class BitcoinModel(BlockchainModel):
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
+        total_prob = transitions.probabilities
+        print(sum(transitions.probabilities.values()))
+        print("Total Probability: ", total_prob)
+        print("Transactions.probabilities: ", transitions.probabilities)
+
         return transitions
 
     def get_honest_revenue(self) -> float:
@@ -124,7 +129,7 @@ class BitcoinModel(BlockchainModel):
 
         return tuple(policy)
 
-    def build_sm1_policy(self) -> BlockchainModel.Policy:
+    def build_attack_policy(self) -> BlockchainModel.Policy:
         policy = np.zeros(self.state_space.size, dtype=int)
 
         for i in range(self.state_space.size):
@@ -150,5 +155,5 @@ if __name__ == '__main__':
 
     mdp = BitcoinModel(0.35, 0.5, 100)
     print(mdp.state_space.size)
-    p = mdp.build_sm1_policy()
+    p = mdp.build_attack_policy()
     print(p[:10])
