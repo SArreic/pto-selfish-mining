@@ -246,8 +246,8 @@ def run_mcts_fees(args: argparse.Namespace):
     fee = args.fee
     transaction_chance = args.delta
     # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
-    simple_mdp = Ethereum2Model(alpha=alpha, beta=gamma, gamma=gamma, max_votes=max_fork, max_proposals=max_fork,
-                                max_stake_pool=max_fork, total_users=max_fork)
+    simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_votes=max_fork, max_proposals=max_fork,
+                                max_stake_pool=max_fork)
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
     rev = rev if 0 < rev < 1 else 0

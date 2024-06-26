@@ -13,34 +13,34 @@ from .base.state_transitions import StateTransitions
 
 
 class Ethereum2Model(BlockchainModel):
-    def __init__(self, alpha: float, beta: float, gamma: float, max_proposals: int, max_votes: int, max_stake_pool: int, total_users: int):
+    def __init__(self, alpha: float, gamma: float, max_proposals: int, max_votes: int,
+                 max_stake_pool: int):
         self.alpha = alpha if alpha is not None else 0.3  # Proportion of malicious users
-        self.beta = beta if beta is not None else 0.2  # Proportion of committee members among total users
-        self.gamma = gamma
+        self.gamma = gamma  # Proportion of committee members among total users
         self.max_proposals = max_proposals
         self.max_votes = max_votes
         self.max_stake_pool = max_stake_pool
-        self.total_users = total_users  # Total number of users in the system
 
         # Define the rewards for different actions
         self.propose_reward = 10  # Placeholder, set according to Ethereum 2.0 specifics
         self.attest_reward = 5  # Placeholder, set according to Ethereum 2.0 specifics
         self.vote_reward = 3  # Placeholder, set according to Ethereum 2.0 specifics
 
-        self.Validator = self.create_int_enum('Validator', ['Active', 'Pending', 'Slashed'])
+        self.User = self.create_int_enum('User', ['Proposer', 'Committee', 'Validator'])
         self.Action = self.create_int_enum('Action', ['Illegal', 'Attest', 'Propose', 'Vote', 'Wait'])
 
         super().__init__()
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}' \
-               f'({self.alpha}, {self.beta}, {self.gamma}, {self.max_proposals}, {self.max_votes}, {self.max_stake_pool}, {self.total_users})'
+               f'({self.alpha}, {self.beta}, {self.gamma}, {self.max_proposals}, {self.max_votes}, {self.max_stake_pool})'
 
     def __reduce__(self) -> Tuple[type, tuple]:
-        return self.__class__, (self.alpha, self.beta, self.gamma, self.max_proposals, self.max_votes, self.max_stake_pool, self.total_users)
+        return self.__class__, (
+            self.alpha, self.beta, self.gamma, self.max_proposals, self.max_votes, self.max_stake_pool)
 
     def get_state_space(self) -> Space:
-        elements = [(0, self.max_proposals), (0, self.max_votes), self.Validator, (0, self.max_stake_pool)]
+        elements = [(0, self.max_proposals), (0, self.max_votes), self.User, (0, self.max_stake_pool)]
         print(f"Elements for state space: {elements}")
         underlying_space = MultiDimensionalDiscreteSpace(*elements)
         print(f"Underlying space size: {underlying_space.size}")
@@ -52,19 +52,20 @@ class Ethereum2Model(BlockchainModel):
         return action_space
 
     def get_initial_state(self) -> BlockchainModel.State:
-        return 0, 0, self.Validator.Active, 0
+        return 0, 0, self.User.Validator, 0
 
     def get_final_state(self) -> BlockchainModel.State:
-        return -1, -1, self.Validator.Slashed, -1
+        return -1, -1, self.User.Validator, -1
 
     def dissect_state(self, state: BlockchainModel.State) -> Tuple[int, int, Enum, int]:
         proposals = state[0]
         votes = state[1]
-        validator_state = state[2]
+        user_role = state[2]
         stake_pool = state[3]
-        return proposals, votes, validator_state, stake_pool
+        return proposals, votes, user_role, stake_pool
 
-    def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action, check_valid: bool = True) -> StateTransitions:
+    def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
+                              check_valid: bool = True) -> StateTransitions:
         transitions = StateTransitions()
 
         if check_valid and not self.is_state_valid(state):
@@ -75,31 +76,30 @@ class Ethereum2Model(BlockchainModel):
             transitions.add(self.final_state, probability=1)
             return transitions
 
-        proposals, votes, validator_state, stake_pool = self.dissect_state(state)
+        proposals, votes, user_role, stake_pool = self.dissect_state(state)
         action_type, action_param = action
 
         if action_type is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
         elif action_type is self.Action.Attest:
-            if validator_state == self.Validator.Active and votes < self.max_votes and stake_pool < self.max_stake_pool:
-                # Assume that attesting increases the stake pool
-                next_state = (proposals, votes + 1, validator_state, stake_pool + 1)
+            if user_role in [self.User.Committee,
+                             self.User.Validator] and votes < self.max_votes and stake_pool < self.max_stake_pool:
+                next_state = (proposals, votes + 1, user_role, stake_pool + 1)
                 transitions.add(next_state, probability=1, reward=self.attest_reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Propose:
-            if validator_state == self.Validator.Active and proposals < self.max_proposals and stake_pool > 0:
-                # Assume that proposing a block uses some stake
-                next_state = (proposals + 1, votes, validator_state, stake_pool - 1)
+            if user_role == self.User.Proposer and proposals < self.max_proposals and stake_pool > 0:
+                next_state = (proposals + 1, votes, user_role, stake_pool - 1)
                 reward = self.propose_reward
                 transitions.add(next_state, probability=1, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Vote:
-            if (validator_state == self.Validator.Active and action_param <= proposals and votes < self.max_votes and
+            if (user_role in [self.User.Committee,
+                              self.User.Validator] and action_param <= proposals and votes < self.max_votes and
                     stake_pool < self.max_stake_pool):
-                # Assume that voting increases the stake pool
-                next_state = (proposals, votes + 1, validator_state, stake_pool + 1)
+                next_state = (proposals, votes + 1, user_role, stake_pool + 1)
                 transitions.add(next_state, probability=1, reward=self.vote_reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
@@ -112,7 +112,7 @@ class Ethereum2Model(BlockchainModel):
         if total_prob == 0:
             num_transitions = len(transitions.probabilities)
             if num_transitions == 0:
-                transitions.add((0, 0, self.Validator.Active, 0), probability=1)
+                transitions.add((0, 0, self.User.Validator, 0), probability=1)
                 total_prob = 1
             else:
                 for key in transitions.probabilities.keys():
@@ -144,8 +144,8 @@ class Ethereum2Model(BlockchainModel):
         return transitions
 
     def is_state_valid(self, state: BlockchainModel.State) -> bool:
-        proposals, votes, validator_state, stake_pool = self.dissect_state(state)
-        return proposals >= 0 and votes >= 0 and validator_state in self.Validator and stake_pool >= 0
+        proposals, votes, user_role, stake_pool = self.dissect_state(state)
+        return proposals >= 0 and votes >= 0 and user_role in self.User and stake_pool >= 0
 
     def get_honest_revenue(self) -> float:
         return self.alpha
@@ -154,7 +154,7 @@ class Ethereum2Model(BlockchainModel):
         policy = np.zeros(self.state_space.size, dtype=int)
 
         for i in range(self.state_space.size):
-            proposals, votes, validator_state, stake_pool = self.state_space.index_to_element(i)
+            proposals, votes, user_role, stake_pool = self.state_space.index_to_element(i)
             if proposals > votes:
                 action = self.Action.Propose
             elif votes > proposals:
@@ -170,13 +170,11 @@ class Ethereum2Model(BlockchainModel):
         policy = np.zeros(self.state_space.size, dtype=int)
 
         for i in range(self.state_space.size):
-            proposals, votes, validator_state, stake_pool = self.state_space.index_to_element(i)
+            proposals, votes, user_role, stake_pool = self.state_space.index_to_element(i)
             if proposals > votes + 1:
                 action = self.Action.Propose
-            elif (votes == proposals - 1 and proposals >= 2) or proposals == self.max_proposals:
-                action = self.Action.Vote
-            elif (votes == 1 and proposals == 1) and validator_state is self.Validator.Active:
-                action = self.Action.Attest
+            elif (votes == proposals - 1 and proposals >= 2) or proposals == 0:
+                action = self.Action.Illegal
             else:
                 action = self.Action.Wait
 
@@ -184,22 +182,10 @@ class Ethereum2Model(BlockchainModel):
 
         return tuple(policy)
 
-    def select_committee(self):
-        committee_size = int(self.beta * self.total_users)
-        committee = np.random.choice(self.total_users, committee_size, replace=False)
-        return committee
-
-    def is_malicious(self, user: int) -> bool:
-        return np.random.rand() < self.alpha
-
-    def committee_is_malicious(self, committee: np.ndarray) -> bool:
-        malicious_count = sum(self.is_malicious(user) for user in committee)
-        return malicious_count / len(committee) > 0.5
-
 
 if __name__ == '__main__':
     print('ethereum_model module test')
     np.set_printoptions(threshold=sys.maxsize, linewidth=sys.maxsize)
 
-    mdp = Ethereum2Model(0.35, 0.2, 0.5, 10, 10, 100, 1000)
+    mdp = Ethereum2Model(0.35, 0.2, 10, 10, 10)
     print(mdp.get_state_space().size)

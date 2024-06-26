@@ -29,7 +29,7 @@ class Ethereum2FeeModel(BlockchainModel):
         self.attest_reward = 5  # Placeholder, set according to Ethereum 2.0 specifics
         self.vote_reward = 3  # Placeholder, set according to Ethereum 2.0 specifics
 
-        self.Validator = self.create_int_enum('Validator', ['Active', 'Pending', 'Slashed'])
+        self.User = self.create_int_enum('User', ['Proposer', 'Committee', 'Validator'])
         self.Action = self.create_int_enum('Action', ['Illegal', 'Propose', 'Vote', 'Attest'])
         self.Block = self.create_int_enum('Block', ['NoBlock', 'Exists'])
         self.Transaction = self.create_int_enum('Transaction', ['NoTransaction', 'WithTransaction'])
@@ -47,7 +47,7 @@ class Ethereum2FeeModel(BlockchainModel):
 
     def get_state_space(self) -> Space:
         elements = [self.Block, self.Transaction] * (2 * self.max_proposals) + [
-            self.Validator, (0, self.max_stake_pool), (0, self.max_pool), (0, self.max_fee_pool),
+            self.User, (0, self.max_stake_pool), (0, self.max_pool), (0, self.max_fee_pool),
             (0, self.network_congestion)
         ]
         underlying_space = MultiDimensionalDiscreteSpace(*elements)
@@ -58,12 +58,12 @@ class Ethereum2FeeModel(BlockchainModel):
 
     def get_initial_state(self) -> BlockchainModel.State:
         initial_state = (self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals * 2 + (
-            self.Validator.Active, 0, 0, 0, 0)
+            self.User.Validator, 0, 0, 0, 0)
         return initial_state
 
     def get_final_state(self) -> BlockchainModel.State:
         final_state = (self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals * 2 + (
-            self.Validator.Slashed, -1, -1, -1, -1)
+            self.User.Validator, -1, -1, -1, -1)
         return final_state
 
     def dissect_state(self, state: BlockchainModel.State) -> Tuple[tuple, tuple, Enum, int, int, int, int]:
@@ -123,21 +123,21 @@ class Ethereum2FeeModel(BlockchainModel):
             transitions.add(self.final_state, probability=1)
             return transitions
 
-        blocks, transactions, validator_state, stake_pool, pool, fee_pool, congestion = self.dissect_state(state)
+        blocks, transactions, user_state, stake_pool, pool, fee_pool, congestion = self.dissect_state(state)
         action_type, action_param = action
 
         if action_type is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
         elif action_type is self.Action.Propose:
-            if validator_state == self.Validator.Active:
+            if user_state == self.User.Proposer:
                 next_state = self.add_proposal(state)
                 transitions.add(next_state, probability=1, reward=self.propose_reward)
         elif action_type is self.Action.Vote:
-            if validator_state == self.Validator.Active and action_param <= self.max_proposals:
+            if user_state in [self.User.Committee, self.User.Validator] and action_param <= self.max_proposals:
                 next_state = self.add_vote(state, action_param)
                 transitions.add(next_state, probability=1, reward=self.vote_reward)
         elif action_type is self.Action.Attest:
-            if validator_state == self.Validator.Active:
+            if user_state == self.User.Validator:
                 next_state = state  # Placeholder for Attest action logic if needed
                 transitions.add(next_state, probability=1, reward=self.attest_reward)
 
@@ -147,7 +147,7 @@ class Ethereum2FeeModel(BlockchainModel):
             num_transitions = len(transitions.probabilities)
             if num_transitions == 0:
                 transitions.add((self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals * 2 + (
-                    self.Validator.Active, 0, 0, 0, 0), probability=1)
+                    self.User.Validator, 0, 0, 0, 0), probability=1)
                 total_prob = 1
             else:
                 for key in transitions.probabilities.keys():
@@ -173,15 +173,17 @@ class Ethereum2FeeModel(BlockchainModel):
         return transitions
 
     def is_state_valid(self, state: BlockchainModel.State) -> bool:
-        blocks, transactions, validator_state, stake_pool, pool, fee_pool, congestion = self.dissect_state(state)
-        return len(blocks) == 2 * self.max_proposals and len(transactions) == 2 * self.max_proposals \
-            and all(isinstance(block, self.Block) for block in blocks) \
-            and all(isinstance(transaction, self.Transaction) for transaction in transactions) \
-            and validator_state in self.Validator \
-            and 0 <= stake_pool <= self.max_stake_pool \
-            and 0 <= pool <= self.max_pool \
-            and 0 <= fee_pool <= self.max_fee_pool \
-            and 0 <= congestion <= self.network_congestion
+        blocks, transactions, user_state, stake_pool, pool, fee_pool, congestion = self.dissect_state(state)
+        if stake_pool < 0 or pool < 0 or fee_pool < 0 or congestion < 0:
+            return False
+        if len(blocks) != 2 * self.max_proposals:
+            return False
+        if len(transactions) != 2 * self.max_proposals:
+            return False
+        if user_state not in self.User:
+            return False
+        return True
+
 
     def get_honest_revenue(self) -> float:
         return self.alpha
