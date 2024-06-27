@@ -33,11 +33,11 @@ class Ethereum2Model(BlockchainModel):
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}' \
-               f'({self.alpha}, {self.beta}, {self.gamma}, {self.max_proposals}, {self.max_votes}, {self.max_stake_pool})'
+               f'({self.alpha}, {self.gamma}, {self.max_proposals}, {self.max_votes}, {self.max_stake_pool})'
 
     def __reduce__(self) -> Tuple[type, tuple]:
         return self.__class__, (
-            self.alpha, self.beta, self.gamma, self.max_proposals, self.max_votes, self.max_stake_pool)
+            self.alpha, self.gamma, self.max_proposals, self.max_votes, self.max_stake_pool)
 
     def get_state_space(self) -> Space:
         elements = [(0, self.max_proposals), (0, self.max_votes), self.User, (0, self.max_stake_pool)]
