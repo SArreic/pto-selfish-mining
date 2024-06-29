@@ -111,6 +111,13 @@ class Ethereum2FeeModel(BlockchainModel):
         new_state = blocks + tuple(new_transactions) + (validator_state, stake_pool, pool, fee_pool, congestion)
         return new_state
 
+    def get_reward(self, state: BlockchainModel.State, reward_factor: float) -> float:
+        blocks, transactions, user_state, stake_pool, pool, fee_pool, congestion = self.dissect_state(state)
+        base_reward = ((stake_pool * 6.4) / (0.4 * math.sqrt(1e3)))
+        max_possible_reward = (self.max_stake_pool * 6.4) / (0.4 * math.sqrt(1e3))
+        normalized_reward = base_reward * reward_factor / max_possible_reward
+        return normalized_reward
+
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:
         transitions = StateTransitions()
@@ -119,7 +126,7 @@ class Ethereum2FeeModel(BlockchainModel):
             transitions.add(self.final_state, probability=1, reward=self.error_penalty)
             return transitions
 
-        elif state == self.final_state:
+        if state == self.final_state:
             transitions.add(self.final_state, probability=1)
             return transitions
 
@@ -131,23 +138,25 @@ class Ethereum2FeeModel(BlockchainModel):
         elif action_type is self.Action.Propose:
             if user_state == self.User.Proposer:
                 next_state = self.add_proposal(state)
-                transitions.add(next_state, probability=1, reward=self.propose_reward)
+                reward = self.get_reward(next_state, self.propose_reward)
+                transitions.add(next_state, probability=1, reward=reward)
         elif action_type is self.Action.Vote:
             if user_state in [self.User.Committee, self.User.Validator] and action_param <= self.max_proposals:
                 next_state = self.add_vote(state, action_param)
-                transitions.add(next_state, probability=1, reward=self.vote_reward)
+                reward = self.get_reward(next_state, self.vote_reward)
+                transitions.add(next_state, probability=1, reward=reward)
         elif action_type is self.Action.Attest:
             if user_state == self.User.Validator:
                 next_state = state  # Placeholder for Attest action logic if needed
-                transitions.add(next_state, probability=1, reward=self.attest_reward)
+                reward = self.get_reward(next_state, self.attest_reward)
+                transitions.add(next_state, probability=1, reward=reward)
 
         # Ensure total transition probabilities sum to 1
         total_prob = sum(transitions.probabilities.values())
         if total_prob == 0:
             num_transitions = len(transitions.probabilities)
             if num_transitions == 0:
-                transitions.add((self.Block.NoBlock, self.Transaction.NoTransaction) * self.max_proposals * 2 + (
-                    self.User.Validator, 0, 0, 0, 0), probability=1)
+                transitions.add(self.final_state, probability=1)
                 total_prob = 1
             else:
                 for key in transitions.probabilities.keys():
@@ -183,7 +192,6 @@ class Ethereum2FeeModel(BlockchainModel):
         if user_state not in self.User:
             return False
         return True
-
 
     def get_honest_revenue(self) -> float:
         return self.alpha
