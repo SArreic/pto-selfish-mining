@@ -1,6 +1,7 @@
 import math
 import sys
 from enum import Enum
+from random import random
 from typing import Tuple
 
 import numpy as np
@@ -14,7 +15,7 @@ from .base.state_transitions import StateTransitions
 
 class Ethereum2Model(BlockchainModel):
     def __init__(self, alpha: float, gamma: float, max_proposals: int, max_votes: int,
-                 max_stake_pool: int):
+                 max_stake_pool: float):
         self.alpha = alpha if alpha is not None else 0.3  # Proportion of malicious users
         self.gamma = gamma  # Proportion of committee members among total users
         self.max_proposals = max_proposals
@@ -22,12 +23,21 @@ class Ethereum2Model(BlockchainModel):
         self.max_stake_pool = max_stake_pool
 
         # Define the rewards for different actions
-        self.propose_reward = 10  # Placeholder, set according to Ethereum 2.0 specifics
-        self.attest_reward = 5  # Placeholder, set according to Ethereum 2.0 specifics
-        self.vote_reward = 3  # Placeholder, set according to Ethereum 2.0 specifics
+        self.base_reward_factor = 64
+        self.base_rewards_per_epoch = 4
+        self.total_balance = 1e3
+        self.proposer_chance = 1e-3
+        self.commitee_chance = 1e-1
+
+        self.propose_reward = 1  # Placeholder, set according to Ethereum 2.0 specifics
+        self.attest_reward = 7 / 8  # Placeholder, set according to Ethereum 2.0 specifics
+        self.vote_reward = 6.75 / 8  # Placeholder, set according to Ethereum 2.0 specifics
+
+        self.max_reward = ((self.max_stake_pool * self.base_reward_factor) /
+                           (self.base_rewards_per_epoch * math.sqrt(self.total_balance)))
 
         self.User = self.create_int_enum('User', ['Proposer', 'Committee', 'Validator'])
-        self.Action = self.create_int_enum('Action', ['Illegal', 'Attest', 'Propose', 'Vote', 'Wait'])
+        self.Action = self.create_int_enum('Action', ['Illegal', 'Attest', 'Propose', 'Vote', 'Wait', 'Stake'])
 
         super().__init__()
 
@@ -64,6 +74,12 @@ class Ethereum2Model(BlockchainModel):
         stake_pool = state[3]
         return proposals, votes, user_role, stake_pool
 
+    def get_reward(self, state: BlockchainModel.State, reward_factor: float) -> float:
+        proposals, votes, user_role, stake_pool = self.dissect_state(state)
+        base_reward = ((stake_pool * self.base_reward_factor) / (self.base_rewards_per_epoch * math.sqrt(self.total_balance)))
+        normalized_reward = base_reward * reward_factor / self.max_reward
+        return normalized_reward
+
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:
         transitions = StateTransitions()
@@ -79,19 +95,31 @@ class Ethereum2Model(BlockchainModel):
         proposals, votes, user_role, stake_pool = self.dissect_state(state)
         action_type, action_param = action
 
-        if action_type is self.Action.Illegal:
+        next_user_role = self.User.Validator
+        if random() < self.proposer_chance:
+            next_user_role = self.User.Proposer
+        elif random() < self.commitee_chance:
+            next_user_role = self.User.Committee
+
+        if action_type is self.Action.Stake and stake_pool < self.max_stake_pool:
+            next_state = (proposals, votes, user_role, stake_pool + 1)
+            self.total_balance += 1
+            transitions.add(next_state, probability=1, reward=-1)
+
+        elif action_type is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
         elif action_type is self.Action.Attest:
             if user_role in [self.User.Committee,
                              self.User.Validator] and votes < self.max_votes and stake_pool < self.max_stake_pool:
-                next_state = (proposals, votes + 1, user_role, stake_pool + 1)
-                transitions.add(next_state, probability=1, reward=self.attest_reward)
+                next_state = (proposals, votes + 1, next_user_role, stake_pool + 1)
+                reward = self.get_reward(next_state, self.attest_reward)
+                transitions.add(next_state, probability=1, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Propose:
             if user_role == self.User.Proposer and proposals < self.max_proposals and stake_pool > 0:
-                next_state = (proposals + 1, votes, user_role, stake_pool - 1)
-                reward = self.propose_reward
+                next_state = (proposals + 1, votes, next_user_role, stake_pool - 1)
+                reward = self.get_reward(next_state, self.propose_reward)
                 transitions.add(next_state, probability=1, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
@@ -99,8 +127,9 @@ class Ethereum2Model(BlockchainModel):
             if (user_role in [self.User.Committee,
                               self.User.Validator] and action_param <= proposals and votes < self.max_votes and
                     stake_pool < self.max_stake_pool):
-                next_state = (proposals, votes + 1, user_role, stake_pool + 1)
-                transitions.add(next_state, probability=1, reward=self.vote_reward)
+                next_state = (proposals, votes + 1, next_user_role, stake_pool + 1)
+                reward = self.get_reward(next_state, self.vote_reward)
+                transitions.add(next_state, probability=1, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Wait:
