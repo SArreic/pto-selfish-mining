@@ -33,9 +33,6 @@ class Ethereum2Model(BlockchainModel):
         self.attest_reward = 7 / 8  # Placeholder, set according to Ethereum 2.0 specifics
         self.vote_reward = 6.75 / 8  # Placeholder, set according to Ethereum 2.0 specifics
 
-        self.max_reward = ((self.max_stake_pool * self.base_reward_factor) /
-                           (self.base_rewards_per_epoch * math.sqrt(self.total_balance)))
-
         self.User = self.create_int_enum('User', ['Proposer', 'Committee', 'Validator'])
         self.Action = self.create_int_enum('Action', ['Illegal', 'Attest', 'Propose', 'Vote', 'Wait', 'Stake'])
 
@@ -77,8 +74,7 @@ class Ethereum2Model(BlockchainModel):
     def get_reward(self, state: BlockchainModel.State, reward_factor: float) -> float:
         proposals, votes, user_role, stake_pool = self.dissect_state(state)
         base_reward = ((stake_pool * self.base_reward_factor) / (self.base_rewards_per_epoch * math.sqrt(self.total_balance)))
-        normalized_reward = base_reward * reward_factor / self.max_reward
-        return normalized_reward
+        return base_reward * reward_factor
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:

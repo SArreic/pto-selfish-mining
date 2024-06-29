@@ -30,7 +30,7 @@ def interrupt_handler(signum: int, frame: Any) -> None:
 
 def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
     expected_horizon = int(1e4)
-    solver = PTOSolverM(mdp, expected_horizon=expected_horizon)
+    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
     p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10))
     sys.stdout.flush()
     revenue = solver.mdp.calc_policy_revenue(p)
