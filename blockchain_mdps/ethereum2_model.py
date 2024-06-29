@@ -14,12 +14,9 @@ from .base.state_transitions import StateTransitions
 
 
 class Ethereum2Model(BlockchainModel):
-    def __init__(self, alpha: float, gamma: float, max_proposals: int, max_votes: int,
-                 max_stake_pool: int):
+    def __init__(self, alpha: float, gamma: float, max_stake_pool: int):
         self.alpha = alpha if alpha is not None else 0.3  # Proportion of malicious users
         self.gamma = gamma  # Proportion of committee members among total users
-        self.max_proposals = max_proposals
-        self.max_votes = max_votes
         self.max_stake_pool = max_stake_pool
 
         # Define the rewards for different actions
@@ -28,6 +25,9 @@ class Ethereum2Model(BlockchainModel):
         self.total_balance = 1e3
         self.proposer_chance = 1e-3
         self.commitee_chance = 1e-1
+
+        self.max_reward = (self.max_stake_pool * 1e3 * self.base_reward_factor) / (
+                self.base_rewards_per_epoch )
 
         self.propose_reward = 0.1  # Scaled down
         self.attest_reward = (7 / 8) * 0.1  # Scaled down
@@ -40,11 +40,11 @@ class Ethereum2Model(BlockchainModel):
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}' \
-               f'({self.alpha}, {self.gamma}, {self.max_proposals}, {self.max_votes}, {self.max_stake_pool})'
+               f'({self.alpha}, {self.gamma}, {self.max_stake_pool})'
 
     def __reduce__(self) -> Tuple[type, tuple]:
         return self.__class__, (
-            self.alpha, self.gamma, self.max_proposals, self.max_votes, self.max_stake_pool)
+            self.alpha, self.gamma, self.max_stake_pool)
 
     def get_state_space(self) -> Space:
         elements = [(0, 1), (0, 1), self.User, (0, self.max_stake_pool), (0, 100)]
@@ -54,7 +54,7 @@ class Ethereum2Model(BlockchainModel):
         return DefaultValueSpace(underlying_space, self.get_final_state())
 
     def get_action_space(self) -> Space:
-        action_space = MultiDimensionalDiscreteSpace(self.Action, (0, self.max_proposals))
+        action_space = MultiDimensionalDiscreteSpace(self.Action, (0, self.max_stake_pool))
         print(f"Action space size: {action_space.size}")
         return action_space
 
@@ -74,11 +74,10 @@ class Ethereum2Model(BlockchainModel):
 
     def get_reward(self, state: BlockchainModel.State, reward_factor: float) -> float:
         propose_success, vote_success, user_role, stake_pool, reputation = self.dissect_state(state)
-        base_reward = ((stake_pool * self.base_reward_factor) / (
-                self.base_rewards_per_epoch * math.sqrt(self.total_balance)))
-        max_possible_reward = (self.max_stake_pool * self.base_reward_factor) / (
-                self.base_rewards_per_epoch * math.sqrt(self.total_balance))
-        normalized_reward = base_reward * reward_factor / max_possible_reward
+        # base_reward = ((stake_pool * self.base_reward_factor) / (
+        #         self.base_rewards_per_epoch * math.sqrt(self.total_balance)))
+        base_reward = 16 * stake_pool
+        normalized_reward = base_reward * reward_factor / self.max_reward
         return normalized_reward
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,

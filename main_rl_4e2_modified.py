@@ -12,6 +12,7 @@ import seaborn as sns
 from blockchain_mdps import *
 from blockchain_mdps.ethereum2_fee_model import Ethereum2FeeModel
 from blockchain_mdps.ethereum2_model import Ethereum2Model
+from blockchain_mdps.base.solver.pto_solver_modified import PTOSolverM
 from reinforcement_learning import *
 # noinspection PyUnusedLocal
 from reinforcement_learning.base.training.callbacks.bva_callback import BVACallback
@@ -29,7 +30,7 @@ def interrupt_handler(signum: int, frame: Any) -> None:
 
 def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
     expected_horizon = int(1e4)
-    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
+    solver = PTOSolverM(mdp, expected_horizon=expected_horizon)
     p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10))
     sys.stdout.flush()
     revenue = solver.mdp.calc_policy_revenue(p)
@@ -246,8 +247,7 @@ def run_mcts_fees(args: argparse.Namespace):
     fee = args.fee
     transaction_chance = args.delta
     # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
-    simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_votes=max_fork, max_proposals=max_fork,
-                                max_stake_pool=max_fork)
+    simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_stake_pool=max_fork)
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
     rev = rev if 0 < rev < 1 else 0

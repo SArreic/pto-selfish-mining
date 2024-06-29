@@ -184,7 +184,6 @@ class Ethereum2FeeModel(BlockchainModel):
             return False
         return True
 
-
     def get_honest_revenue(self) -> float:
         return self.alpha
 
