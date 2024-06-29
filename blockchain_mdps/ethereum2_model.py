@@ -25,6 +25,7 @@ class Ethereum2Model(BlockchainModel):
         self.total_balance = 1e3
         self.proposer_chance = 1e-3
         self.commitee_chance = 1e-1
+        self.validator_chance = 1.0 - self.proposer_chance - self.commitee_chance
 
         self.max_reward = (self.max_stake_pool * 1e3 * self.base_reward_factor) / (
                 self.base_rewards_per_epoch )
@@ -74,11 +75,10 @@ class Ethereum2Model(BlockchainModel):
 
     def get_reward(self, state: BlockchainModel.State, reward_factor: float) -> float:
         propose_success, vote_success, user_role, stake_pool, reputation = self.dissect_state(state)
-        # base_reward = ((stake_pool * self.base_reward_factor) / (
-        #         self.base_rewards_per_epoch * math.sqrt(self.total_balance)))
-        base_reward = 16 * stake_pool
-        normalized_reward = base_reward * reward_factor / self.max_reward
-        return normalized_reward
+        base_reward = ((stake_pool * self.base_reward_factor) / (
+                self.base_rewards_per_epoch * math.sqrt(self.total_balance)))
+        # normalized_reward = base_reward * reward_factor / self.max_reward
+        return base_reward * reward_factor
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:
@@ -95,13 +95,6 @@ class Ethereum2Model(BlockchainModel):
         propose_success, vote_success, user_role, stake_pool, reputation = self.dissect_state(state)
         action_type, action_param = action
 
-        next_user_role = self.User.Validator
-        next_chance = random()
-        if next_chance < self.proposer_chance:
-            next_user_role = self.User.Proposer
-        elif next_chance > 1.0 - self.commitee_chance:
-            next_user_role = self.User.Committee
-
         if action_type is self.Action.Stake and stake_pool < self.max_stake_pool:
             next_state = (propose_success, vote_success, user_role, stake_pool + 1, reputation)
             self.total_balance += 1
@@ -112,25 +105,43 @@ class Ethereum2Model(BlockchainModel):
         elif action_type is self.Action.Attest:
             if user_role in [self.User.Committee,
                              self.User.Validator] and vote_success < 1 and stake_pool < self.max_stake_pool:
-                next_state = (propose_success, 1, next_user_role, stake_pool + 1, min(reputation + 1, 100))
+                next_state = (propose_success, 1, self.User.Proposer, stake_pool + 1, min(reputation + 1, 100))
                 reward = self.get_reward(next_state, self.attest_reward)
-                transitions.add(next_state, probability=1, reward=reward)
+                transitions.add(next_state, probability=self.proposer_chance, reward=reward)
+                next_state = (propose_success, 1, self.User.Committee, stake_pool + 1, min(reputation + 1, 100))
+                reward = self.get_reward(next_state, self.attest_reward)
+                transitions.add(next_state, probability=self.commitee_chance, reward=reward)
+                next_state = (propose_success, 1, self.User.Validator, stake_pool + 1, min(reputation + 1, 100))
+                reward = self.get_reward(next_state, self.attest_reward)
+                transitions.add(next_state, probability=self.validator_chance, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Propose:
             if user_role == self.User.Proposer and propose_success < 1 and stake_pool > 0:
-                next_state = (1, vote_success, next_user_role, stake_pool - 1, min(reputation + 1, 100))
+                next_state = (1, vote_success, self.User.Proposer, stake_pool - 1, min(reputation + 1, 100))
                 reward = self.get_reward(next_state, self.propose_reward)
-                transitions.add(next_state, probability=1, reward=reward)
+                transitions.add(next_state, probability=self.proposer_chance, reward=reward)
+                next_state = (1, vote_success, self.User.Committee, stake_pool - 1, min(reputation + 1, 100))
+                reward = self.get_reward(next_state, self.propose_reward)
+                transitions.add(next_state, probability=self.commitee_chance, reward=reward)
+                next_state = (1, vote_success, self.User.Validator, stake_pool - 1, min(reputation + 1, 100))
+                reward = self.get_reward(next_state, self.propose_reward)
+                transitions.add(next_state, probability=self.validator_chance, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Vote:
             if (user_role in [self.User.Committee,
                               self.User.Validator] and action_param <= 1 and vote_success < 1 and
                     stake_pool < self.max_stake_pool):
-                next_state = (propose_success, 1, next_user_role, stake_pool + 1, min(reputation + 1, 100))
+                next_state = (propose_success, 1, self.User.Proposer, stake_pool + 1, min(reputation + 1, 100))
                 reward = self.get_reward(next_state, self.vote_reward)
-                transitions.add(next_state, probability=1, reward=reward)
+                transitions.add(next_state, probability=self.proposer_chance, reward=reward)
+                next_state = (propose_success, 1, self.User.Committee, stake_pool + 1, min(reputation + 1, 100))
+                reward = self.get_reward(next_state, self.vote_reward)
+                transitions.add(next_state, probability=self.commitee_chance, reward=reward)
+                next_state = (propose_success, 1, self.User.Validator, stake_pool + 1, min(reputation + 1, 100))
+                reward = self.get_reward(next_state, self.vote_reward)
+                transitions.add(next_state, probability=self.validator_chance, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Wait:

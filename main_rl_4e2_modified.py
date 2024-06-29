@@ -35,7 +35,7 @@ def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Poli
     sys.stdout.flush()
     revenue = solver.mdp.calc_policy_revenue(p)
     if np.iscomplex(revenue):
-        revenue = revenue.real  # 处理复数部分，仅取实数部分
+        revenue = revenue.real
     return np.float32(revenue), p
 
 
