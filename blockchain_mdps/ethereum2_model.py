@@ -1,6 +1,7 @@
 import math
 import sys
 from enum import Enum
+from random import random
 from typing import Tuple
 
 import numpy as np
@@ -22,12 +23,18 @@ class Ethereum2Model(BlockchainModel):
         self.max_stake_pool = max_stake_pool
 
         # Define the rewards for different actions
-        self.propose_reward = 10  # Placeholder, set according to Ethereum 2.0 specifics
-        self.attest_reward = 5  # Placeholder, set according to Ethereum 2.0 specifics
-        self.vote_reward = 3  # Placeholder, set according to Ethereum 2.0 specifics
+        self.base_reward_factor = 6.4  # Scaled down
+        self.base_rewards_per_epoch = 0.4  # Scaled down
+        self.total_balance = 1e3
+        self.proposer_chance = 1e-3
+        self.commitee_chance = 1e-1
+
+        self.propose_reward = 0.1  # Scaled down
+        self.attest_reward = (7 / 8) * 0.1  # Scaled down
+        self.vote_reward = (6.75 / 8) * 0.1  # Scaled down
 
         self.User = self.create_int_enum('User', ['Proposer', 'Committee', 'Validator'])
-        self.Action = self.create_int_enum('Action', ['Illegal', 'Attest', 'Propose', 'Vote', 'Wait'])
+        self.Action = self.create_int_enum('Action', ['Illegal', 'Attest', 'Propose', 'Vote', 'Wait', 'Stake'])
 
         super().__init__()
 
@@ -40,7 +47,7 @@ class Ethereum2Model(BlockchainModel):
             self.alpha, self.gamma, self.max_proposals, self.max_votes, self.max_stake_pool)
 
     def get_state_space(self) -> Space:
-        elements = [(0, self.max_proposals), (0, self.max_votes), self.User, (0, self.max_stake_pool)]
+        elements = [(0, 1), (0, 1), self.User, (0, self.max_stake_pool), (0, 100)]
         print(f"Elements for state space: {elements}")
         underlying_space = MultiDimensionalDiscreteSpace(*elements)
         print(f"Underlying space size: {underlying_space.size}")
@@ -52,17 +59,27 @@ class Ethereum2Model(BlockchainModel):
         return action_space
 
     def get_initial_state(self) -> BlockchainModel.State:
-        return 0, 0, self.User.Validator, 0
+        return 0, 0, self.User.Validator, 0, 50
 
     def get_final_state(self) -> BlockchainModel.State:
-        return -1, -1, self.User.Validator, -1
+        return -1, -1, self.User.Validator, -1, -1
 
-    def dissect_state(self, state: BlockchainModel.State) -> Tuple[int, int, Enum, int]:
-        proposals = state[0]
-        votes = state[1]
+    def dissect_state(self, state: BlockchainModel.State) -> Tuple[int, int, Enum, int, int]:
+        propose_success = state[0]
+        vote_success = state[1]
         user_role = state[2]
         stake_pool = state[3]
-        return proposals, votes, user_role, stake_pool
+        reputation = state[4]
+        return propose_success, vote_success, user_role, stake_pool, reputation
+
+    def get_reward(self, state: BlockchainModel.State, reward_factor: float) -> float:
+        propose_success, vote_success, user_role, stake_pool, reputation = self.dissect_state(state)
+        base_reward = ((stake_pool * self.base_reward_factor) / (
+                self.base_rewards_per_epoch * math.sqrt(self.total_balance)))
+        max_possible_reward = (self.max_stake_pool * self.base_reward_factor) / (
+                self.base_rewards_per_epoch * math.sqrt(self.total_balance))
+        normalized_reward = base_reward * reward_factor / max_possible_reward
+        return normalized_reward
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:
@@ -76,31 +93,45 @@ class Ethereum2Model(BlockchainModel):
             transitions.add(self.final_state, probability=1)
             return transitions
 
-        proposals, votes, user_role, stake_pool = self.dissect_state(state)
+        propose_success, vote_success, user_role, stake_pool, reputation = self.dissect_state(state)
         action_type, action_param = action
 
-        if action_type is self.Action.Illegal:
+        next_user_role = self.User.Validator
+        next_chance = random()
+        if next_chance < self.proposer_chance:
+            next_user_role = self.User.Proposer
+        elif next_chance > 1.0 - self.commitee_chance:
+            next_user_role = self.User.Committee
+
+        if action_type is self.Action.Stake and stake_pool < self.max_stake_pool:
+            next_state = (propose_success, vote_success, user_role, stake_pool + 1, reputation)
+            self.total_balance += 1
+            transitions.add(next_state, probability=1, reward=-1)
+
+        elif action_type is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
         elif action_type is self.Action.Attest:
             if user_role in [self.User.Committee,
-                             self.User.Validator] and votes < self.max_votes and stake_pool < self.max_stake_pool:
-                next_state = (proposals, votes + 1, user_role, stake_pool + 1)
-                transitions.add(next_state, probability=1, reward=self.attest_reward)
+                             self.User.Validator] and vote_success < 1 and stake_pool < self.max_stake_pool:
+                next_state = (propose_success, 1, next_user_role, stake_pool + 1, min(reputation + 1, 100))
+                reward = self.get_reward(next_state, self.attest_reward)
+                transitions.add(next_state, probability=1, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Propose:
-            if user_role == self.User.Proposer and proposals < self.max_proposals and stake_pool > 0:
-                next_state = (proposals + 1, votes, user_role, stake_pool - 1)
-                reward = self.propose_reward
+            if user_role == self.User.Proposer and propose_success < 1 and stake_pool > 0:
+                next_state = (1, vote_success, next_user_role, stake_pool - 1, min(reputation + 1, 100))
+                reward = self.get_reward(next_state, self.propose_reward)
                 transitions.add(next_state, probability=1, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Vote:
             if (user_role in [self.User.Committee,
-                              self.User.Validator] and action_param <= proposals and votes < self.max_votes and
+                              self.User.Validator] and action_param <= 1 and vote_success < 1 and
                     stake_pool < self.max_stake_pool):
-                next_state = (proposals, votes + 1, user_role, stake_pool + 1)
-                transitions.add(next_state, probability=1, reward=self.vote_reward)
+                next_state = (propose_success, 1, next_user_role, stake_pool + 1, min(reputation + 1, 100))
+                reward = self.get_reward(next_state, self.vote_reward)
+                transitions.add(next_state, probability=1, reward=reward)
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
         elif action_type is self.Action.Wait:
@@ -112,40 +143,41 @@ class Ethereum2Model(BlockchainModel):
         if total_prob == 0:
             num_transitions = len(transitions.probabilities)
             if num_transitions == 0:
-                transitions.add((0, 0, self.User.Validator, 0), probability=1)
+                transitions.add((0, 0, self.User.Validator, 0, 50), probability=1)
                 total_prob = 1
             else:
                 for key in transitions.probabilities.keys():
                     transitions.probabilities[key] = 1 / num_transitions
-                total_prob = sum(transitions.probabilities.values())
-                if not math.isclose(total_prob, 1, abs_tol=1e-5):
-                    raise ValueError("Total transition probability does not sum to 1 after adjustment")
-
-        if not math.isclose(total_prob, 1, abs_tol=1e-5):
-            factor = 1 / total_prob
-            for key in transitions.probabilities.keys():
-                transitions.probabilities[key] *= factor
-            total_prob = sum(transitions.probabilities.values())
-            if not math.isclose(total_prob, 1, abs_tol=1e-5):
-                remaining_prob = 1 - total_prob
-                for key in transitions.probabilities.keys():
-                    if remaining_prob != 0:
-                        transitions.probabilities[key] += remaining_prob / len(transitions.probabilities)
-                        remaining_prob = 0
-                total_prob = sum(transitions.probabilities.values())
-                if not math.isclose(total_prob, 1, abs_tol=1e-5):
-                    raise ValueError("Total transition probability does not sum to 1 after adjustment")
-
-        min_difficulty = 1e-5
-        for key in transitions.difficulty_contributions.keys():
-            if transitions.difficulty_contributions[key] == 0:
-                transitions.difficulty_contributions[key] = min_difficulty
+                    total_prob += transitions.probabilities[key]
+        else:
+            for state in transitions.probabilities.keys():
+                transitions.probabilities[state] /= total_prob
 
         return transitions
 
+    def is_action_valid(self, state: BlockchainModel.State, action: BlockchainModel.Action) -> bool:
+        propose_success, vote_success, user_role, stake_pool, reputation = self.dissect_state(state)
+        action_type, action_param = action
+        if action_type is self.Action.Stake and stake_pool < self.max_stake_pool:
+            return True
+        if action_type is self.Action.Illegal:
+            return True
+        if action_type is self.Action.Attest and user_role in [self.User.Committee,
+                                                               self.User.Validator] and vote_success < 1 and stake_pool < self.max_stake_pool:
+            return True
+        if action_type is self.Action.Propose and user_role == self.User.Proposer and propose_success < 1 and stake_pool > 0:
+            return True
+        if action_type is self.Action.Vote and user_role in [self.User.Committee,
+                                                             self.User.Validator] and action_param <= 1 and vote_success < 1 and stake_pool < self.max_stake_pool:
+            return True
+        if action_type is self.Action.Wait:
+            return True
+        return False
+
     def is_state_valid(self, state: BlockchainModel.State) -> bool:
-        proposals, votes, user_role, stake_pool = self.dissect_state(state)
-        return proposals >= 0 and votes >= 0 and user_role in self.User and stake_pool >= 0
+        propose_success, vote_success, user_role, stake_pool, reputation = self.dissect_state(state)
+        return (
+                0 <= propose_success <= 1 and 0 <= vote_success <= 1 and 0 <= stake_pool <= self.max_stake_pool and 0 <= reputation <= 100)
 
     def get_honest_revenue(self) -> float:
         return self.alpha
