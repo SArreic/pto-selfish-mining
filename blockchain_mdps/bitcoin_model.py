@@ -96,11 +96,6 @@ class BitcoinModel(BlockchainModel):
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
-        total_prob = transitions.probabilities
-        print(sum(transitions.probabilities.values()))
-        print("Total Probability: ", total_prob)
-        print("Transactions.probabilities: ", transitions.probabilities)
-
         return transitions
 
     def get_honest_revenue(self) -> float:

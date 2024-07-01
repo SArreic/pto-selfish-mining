@@ -66,7 +66,7 @@ def solve_pt(args: argparse.Namespace) -> None:
 
     trainer.run()
 
-    log_solution_info(mdp, rev, trainer)
+    # log_solution_info(mdp, rev, trainer)
 
 
 def solve_pt_multiple_times(args: argparse.Namespace, times: int = 10) -> None:
@@ -244,11 +244,12 @@ def run_mcts_fees(args: argparse.Namespace):
     simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     # simple_mdp = EthereumModel(alpha=alpha, max_fork=max_fork)
     rev, _ = solve_mdp_exactly(simple_mdp)
+    print("rev is ", rev)
+    print("The best policy is {}".format(_))
     mdp = BitcoinFeeModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
                           max_pool=max_fork)
     # mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     smart_init = rev * (1 + fee * transaction_chance)
-    print("rev is ", rev)
     # smart_init = None
     print(f'{mdp.state_space.size:,}')
 

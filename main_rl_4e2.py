@@ -30,7 +30,7 @@ def interrupt_handler(signum: int, frame: Any) -> None:
 
 def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
     expected_horizon = int(1e4)
-    solver = PTOSolverM(mdp, expected_horizon=expected_horizon)
+    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
     p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10))
     sys.stdout.flush()
     revenue = solver.mdp.calc_policy_revenue(p)
@@ -250,7 +250,8 @@ def run_mcts_fees(args: argparse.Namespace):
     simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_stake_pool=max_fork)
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
-    rev = rev if 0 < rev < 1 else 0
+    print("The best policy is {}".format(_))
+    rev = rev if 0 < rev < 1 else (0 if rev < 0 else 1)
     mdp = Ethereum2FeeModel(alpha=alpha, gamma=gamma, max_pool=max_fork,
                             max_fee_pool=max_fork, max_proposals=max_fork,
                             max_stake_pool=max_fork, max_votes=max_fork,

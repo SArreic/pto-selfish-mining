@@ -20,12 +20,17 @@ class PTOSolverM(BlockchainMDPSolver):
     def calc_opt_policy(self, discount: int = 1, epsilon: float = 1e-5, max_iter: int = 100000, skip_check: bool = True,
                         verbose: bool = False) -> Tuple[BlockchainModel.Policy, float, int, np.array]:
         self.mdp.build_mdp(check_valid=not skip_check)
+        print("mdo is built")
         p_mat, r_mat = self.get_pt_mdp()
+        print("mats got")
         vi = mdptoolbox.PolicyIteration(p_mat, r_mat, discount=discount, epsilon=epsilon, max_iter=max_iter,
                                         skip_check=skip_check)
+        print("vi is built")
         if verbose:
             vi.setVerbose()
+        print("vi is running")
         vi.run()
+        print("vi's running is done")
 
         return vi.policy, vi.V[self.mdp.initial_state_index] / self.expected_horizon, vi.iter, vi.V
 
