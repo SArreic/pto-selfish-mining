@@ -31,7 +31,7 @@ def interrupt_handler(signum: int, frame: Any) -> None:
 def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
     expected_horizon = int(1e4)
     solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10))
+    p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10)) # Sigular Matrix Detected Here
     sys.stdout.flush()
     revenue = solver.mdp.calc_policy_revenue(p)
     if np.iscomplex(revenue):
@@ -251,7 +251,7 @@ def run_mcts_fees(args: argparse.Namespace):
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
     print("The best policy is {}".format(_))
-    rev = rev if 0 < rev < 1 else (0 if rev < 0 else 1)
+    rev = rev if -1 <= rev <= 1 else (-1 if rev < -1 else 1)
     mdp = Ethereum2FeeModel(alpha=alpha, gamma=gamma, max_pool=max_fork,
                             max_fee_pool=max_fork, max_proposals=max_fork,
                             max_stake_pool=max_fork, max_votes=max_fork,
@@ -320,7 +320,7 @@ if __name__ == '__main__':
     parser.add_argument('--load_experiment', help='name of experiment to continue', default=None)
     parser.add_argument('--alpha', help='miner size', default=0.35, type=float)
     parser.add_argument('--gamma', help='rushing factor', default=0.5, type=float)
-    parser.add_argument('--max_fork', help='maximal fork size', default=10, type=int)
+    parser.add_argument('--max_fork', help='maximal fork size', default=5, type=int)
     parser.add_argument('--fee', help='transaction fee', default=10, type=float)
     parser.add_argument('--delta', help='chance for a transaction', default=0.01, type=float)
     parser.add_argument('--seed', help='random seed', default=0, type=int)
