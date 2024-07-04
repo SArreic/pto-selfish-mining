@@ -25,12 +25,9 @@ class Ethereum2Model(BlockchainModel):
         self.base_rewards_per_epoch = 0.4  # Scaled down
         self.total_balance = 100.0
 
-        self.max_reward = (self.max_stake_pool * 1e3 * self.base_reward_factor) / (
-                self.base_rewards_per_epoch)
-
-        self.propose_reward = 0.1  # Scaled down
-        self.vote_reward = (7 / 8) * 0.1  # Scaled down
-        self.base_reward = (6.75 / 8) * 0.1  # Scaled down
+        self.propose_reward = 1e2  # Scaled down
+        self.vote_reward = (7 / 8) * 1e2  # Scaled down
+        self.base_reward = (6.75 / 8) * 1e2  # Scaled down
 
         self.User = self.create_int_enum('User', ['Proposer', 'Validator', 'Invalid'])
         self.Action = self.create_int_enum('Action', ['Illegal', 'Stake', 'Propose', 'Vote', 'Wait'])
@@ -73,18 +70,21 @@ class Ethereum2Model(BlockchainModel):
 
     def get_reward(self, state: BlockchainModel.State, reward_factor: float) -> float:
         propose_success, vote_success, user_role, stake_pool, failures = self.dissect_state(state)
+        print(f"Calculating reward: state={state}, reward_factor={reward_factor}, total_balance={self.total_balance}")
         reward = (reward_factor * (stake_pool + 1.0)) / self.total_balance
+        print(f"Calculated reward: {reward}")
         return reward
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:
         transitions = StateTransitions()
+        print(f"Current state: {state}, Action: {action}")
 
-        if not self.is_state_valid(state):
-            transitions.add(self.final_state, probability=1, reward=-1)
-            return transitions
+        # if not self.is_state_valid(state):
+        #     transitions.add(self.final_state, probability=1, reward=0)
+        #     return transitions
 
-        elif state == self.final_state:
+        if state == self.final_state:
             transitions.add(self.final_state, probability=1, reward=0)
             return transitions
 
@@ -96,9 +96,16 @@ class Ethereum2Model(BlockchainModel):
             failures = 0
 
         if stake_pool <= 1:
-            stake_pool = 1
-            next_state = (propose_success, vote_success, self.User.Validator, stake_pool, failures)
-            transitions.add(next_state, probability=1, reward=-1)
+            if stake_pool < 1:
+                self.total_balance += 1
+                next_state = (propose_success, vote_success, self.User.Validator, stake_pool + 1, failures)
+                transitions.add(next_state, probability=1, reward=-1)
+                print(f"Next state: {next_state}, Probability: 1, Reward: -1")
+            else:
+                next_state = (propose_success, vote_success, self.User.Validator, stake_pool, failures)
+                transitions.add(next_state, probability=1, reward=0)
+                print(f"Next state: {next_state}, Probability: 1, Reward: 0")
+
             return transitions
 
         if user_role is self.User.Validator:
@@ -110,43 +117,71 @@ class Ethereum2Model(BlockchainModel):
             next_state = (propose_success, vote_success, user_role, next_stake, failures)
             self.total_balance += 1.0
             transitions.add(next_state, probability=1, reward=-1.0)
+            print(f"Next state: {next_state}, Probability: 1, Reward: -1.0")
 
         elif action_type is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
+            print(f"Next state: {self.final_state}, Probability: 1, Reward: {self.error_penalty / 2}")
 
         elif action_type is self.Action.Propose:
             if user_role == self.User.Proposer and stake_pool > 0:
-                next_state = (1, vote_success, user_role, stake_pool - 1, failures)
+                next_state = (1, vote_success, self.User.Validator, stake_pool, failures)
                 reward = self.get_reward(next_state, self.propose_reward)
-                transitions.add(next_state, probability=self.alpha, reward=reward,
-                                difficulty_contribution=stake_pool)
+                transitions.add(next_state, probability=self.alpha, reward=reward, difficulty_contribution=stake_pool)
+                print(
+                    f"Next state: {next_state}, Probability: {self.alpha}, Reward: {reward}, Difficulty: {stake_pool}")
+
                 next_failures = failures + 1
                 reward = self.get_reward(next_state, self.base_reward)
-                next_state = (0, vote_success, user_role, stake_pool, next_failures)
-                transitions.add(next_state, probability=self.gamma, reward=reward,
-                                difficulty_contribution=stake_pool)
+                next_state = (0, vote_success, self.User.Validator, stake_pool, next_failures)
+                transitions.add(next_state, probability=1 - self.alpha, reward=reward, difficulty_contribution=stake_pool)
+                print(
+                    f"Next state: {next_state}, Probability: {1 - self.alpha}, Reward: {reward}, Difficulty: {stake_pool}")
             else:
                 transitions.add(state, probability=1, reward=0)
+                print(f"Next state: {state}, Probability: 1, Reward: 0")
 
         elif action_type is self.Action.Vote:
             if user_role == self.User.Validator and stake_pool > 0:
-                next_state = (propose_success, 1, user_role, stake_pool - 1, failures)
+                next_state = (propose_success, 1, user_role, stake_pool, failures)
                 reward = self.get_reward(next_state, self.vote_reward)
-                transitions.add(next_state, probability=self.gamma, reward=reward,
-                                difficulty_contribution=stake_pool)
+                transitions.add(next_state, probability=self.gamma, reward=reward, difficulty_contribution=stake_pool)
+                print(
+                    f"Next state: {next_state}, Probability: {self.gamma}, Reward: {reward}, Difficulty: {stake_pool}")
+
                 next_failures = failures + 1
                 reward = self.get_reward(next_state, self.base_reward)
                 next_state = (propose_success, 0, user_role, stake_pool, next_failures)
                 transitions.add(next_state, probability=1 - self.gamma, reward=reward,
                                 difficulty_contribution=stake_pool)
+                print(
+                    f"Next state: {next_state}, Probability: {1 - self.gamma}, Reward: {reward}, Difficulty: {stake_pool}")
             else:
                 transitions.add(state, probability=1, reward=0)
+                print(f"Next state: {state}, Probability: 1, Reward: 0")
 
         elif action_type is self.Action.Wait:
-            next_state = (0, 0, user_role, stake_pool, failures)
-            reward = self.get_reward(next_state, self.base_reward)
-            transitions.add(next_state, probability=1, reward=reward,
-                            difficulty_contribution=propose_success + vote_success)
+            if user_role == self.User.Invalid:
+                next_state = (0, 0, self.User.Proposer, stake_pool, 0)
+                transitions.add(next_state, probability=self.alpha, reward=0)
+                print(f"Next state: {state}, Probability: {self.alpha}, Reward: 0")
+
+                next_state = (0, 0, self.User.Validator, stake_pool, 0)
+                transitions.add(next_state, probability=self.gamma, reward=0)
+                print(f"Next state: {state}, Probability: {self.gamma}, Reward: 0")
+
+            elif user_role == self.User.Validator or user_role == self.User.Proposer:
+                next_state = (propose_success, vote_success, user_role, stake_pool, failures)
+                reward = self.get_reward(next_state, self.base_reward)
+                transitions.add(next_state, probability=1, reward=reward,
+                                difficulty_contribution=propose_success + vote_success)
+                print(
+                    f"Next state: {next_state}, Probability: 1, Reward: {reward}, Difficulty: {propose_success + vote_success}")
+
+            else:
+                transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+                print(
+                    f"Next final state: {self.final_state}, Probability: 1, Reward: {self.error_penalty}")
 
         return transitions
 
@@ -170,7 +205,7 @@ class Ethereum2Model(BlockchainModel):
     def is_state_valid(self, state: BlockchainModel.State) -> bool:
         propose_success, vote_success, user_role, stake_pool, failures = self.dissect_state(state)
         return (0 <= propose_success <= 1 and 0 <= vote_success <= 1
-                and 0 <= stake_pool <= self.max_stake_pool and 0 <= failures <= 10)
+                and 0 <= stake_pool <= self.max_stake_pool and 0 <= failures <= 5)
 
     def get_honest_revenue(self) -> float:
         return self.alpha
