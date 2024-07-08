@@ -34,8 +34,8 @@ def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Poli
     p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10)) # Sigular Matrix Detected Here
     sys.stdout.flush()
     revenue = solver.mdp.calc_policy_revenue(p)
-    if np.iscomplex(revenue):
-        revenue = revenue.real
+    # if np.iscomplex(revenue):
+    #     revenue = revenue.real
     return np.float32(revenue), p
 
 
