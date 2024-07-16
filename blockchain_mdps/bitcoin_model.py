@@ -29,11 +29,16 @@ class BitcoinModel(BlockchainModel):
         return self.__class__, (self.alpha, self.gamma, self.max_fork)
 
     def get_state_space(self) -> Space:
-        underlying_space = MultiDimensionalDiscreteSpace((0, self.max_fork), (0, self.max_fork), self.Fork)
+        elements = (0, self.max_fork), (0, self.max_fork), self.Fork
+        print(f"Elements for state space: {elements}")
+        underlying_space = MultiDimensionalDiscreteSpace(*elements)
+        print(f"Underlying space size: {underlying_space.size}")
         return DefaultValueSpace(underlying_space, self.get_final_state())
 
     def get_action_space(self) -> Space:
-        return DiscreteSpace(self.Action)
+        action_space = DiscreteSpace(self.Action)
+        print(f"Action space size: {action_space.size}")
+        return action_space
 
     def get_initial_state(self) -> BlockchainModel.State:
         return 0, 0, self.Fork.Irrelevant
@@ -54,47 +59,75 @@ class BitcoinModel(BlockchainModel):
 
         if action is self.Action.Illegal:
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
+            print(
+                f"Next final state: {self.final_state}, Probability: 1, Reward: {self.error_penalty / 2}")
 
         if action is self.Action.Adopt:
             if h > 0:
                 next_state = 0, 0, self.Fork.Irrelevant
                 transitions.add(next_state, probability=1, difficulty_contribution=h)
+                print(
+                    f"Next state: {next_state}, Probability: 1, Difficulty: {h}")
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+                print(
+                    f"Next final state: {self.final_state}, Probability: 1, Reward: {self.error_penalty}")
 
         if action is self.Action.Override:
             if a > h:
                 next_state = a - h - 1, 0, self.Fork.Irrelevant
                 transitions.add(next_state, probability=1, reward=h + 1, difficulty_contribution=h + 1)
+                print(
+                    f"Next state: {next_state}, Probability: 1, "
+                    f"Reward: {h + 1}, Difficulty: {h + 1}")
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+                print(
+                    f"Next final state: {self.final_state}, Probability: 1, Reward: {self.error_penalty}")
 
         if action is self.Action.Match:
             if 0 < h <= a < self.max_fork and fork is self.Fork.Relevant:
                 next_state = a, h, self.Fork.Active
                 transitions.add(next_state, probability=1)
+                print(
+                    f"Next state: {next_state}, Probability: 1")
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+                print(
+                    f"Next final state: {self.final_state}, Probability: 1, Reward: {self.error_penalty}")
 
         if action is self.Action.Wait:
             if fork is not self.Fork.Active and a < self.max_fork and h < self.max_fork:
                 attacker_block = a + 1, h, self.Fork.Irrelevant
                 transitions.add(attacker_block, probability=self.alpha)
+                print(
+                    f"Next attacker block: {attacker_block}, Probability: {self.alpha}")
 
                 honest_block = a, h + 1, self.Fork.Relevant
                 transitions.add(honest_block, probability=1 - self.alpha)
+                print(
+                    f"Next honest block: {honest_block}, Probability: {1 - self.alpha}")
             elif fork is self.Fork.Active and 0 < h <= a < self.max_fork:
                 attacker_block = a + 1, h, self.Fork.Active
                 transitions.add(attacker_block, probability=self.alpha)
+                print(
+                    f"Next attacker block: {attacker_block}, Probability: {self.alpha}")
 
                 honest_support_block = a - h, 1, self.Fork.Relevant
                 transitions.add(honest_support_block, probability=self.gamma * (1 - self.alpha), reward=h,
                                 difficulty_contribution=h)
+                print(
+                    f"Next honest support block: {honest_support_block}, Probability: {self.gamma * (1 - self.alpha)}, "
+                    f"Reward: {h}, Difficulty: {h}")
 
                 honest_adversary_block = a, h + 1, self.Fork.Relevant
                 transitions.add(honest_adversary_block, probability=(1 - self.gamma) * (1 - self.alpha))
+                print(
+                    f"Next honest adversary block: {self.final_state}, Probability: {(1 - self.gamma) * (1 - self.alpha)}")
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+                print(
+                    f"Next final state: {self.final_state}, Probability: 1, Reward: {self.error_penalty}")
 
         total_prob = transitions.probabilities
         print(sum(transitions.probabilities.values()))

@@ -20,12 +20,34 @@ class PTOSolver(BlockchainMDPSolver):
     def calc_opt_policy(self, discount: int = 1, epsilon: float = 1e-5, max_iter: int = 100000, skip_check: bool = True,
                         verbose: bool = False) -> Tuple[BlockchainModel.Policy, float, int, np.array]:
         self.mdp.build_mdp(check_valid=not skip_check)
+        print("Number of states:", self.mdp.num_of_states)
+        print("Number of actions:", self.mdp.num_of_actions)
+
         p_mat, r_mat = self.get_pt_mdp()
+
+        for action in range(len(p_mat)):
+            if isinstance(p_mat[action], np.ndarray):
+                print(f"Action {action} - Transition probabilities matrix (dense):")
+                print(p_mat[action])
+            else:
+                print(f"Action {action} - Transition probabilities matrix (sparse):")
+                print(find(p_mat[action]))
+
+            if isinstance(r_mat[action], np.ndarray):
+                print(f"Action {action} - Reward matrix (dense):")
+                print(r_mat[action])
+            else:
+                print(f"Action {action} - Reward matrix (sparse):")
+                print(find(r_mat[action]))
+
+        print("Convergence Warning triggered here:")
         vi = mdptoolbox.PolicyIteration(p_mat, r_mat, discount=discount, epsilon=epsilon, max_iter=max_iter,
                                         skip_check=skip_check)
         if verbose:
             vi.setVerbose()
+        # print("Before Singular Matrix Detected")
         vi.run()
+        # print("After Singular Matrix Detected")
 
         return vi.policy, vi.V[self.mdp.initial_state_index] / self.expected_horizon, vi.iter, vi.V
 
@@ -44,6 +66,8 @@ class PTOSolver(BlockchainMDPSolver):
         p_mats = self.mdp.P.get_data()
         r_mats = self.mdp.R.get_data()
         d_mats = self.mdp.D.get_data()
+
+        print("Number of actions:", self.mdp.num_of_actions)
 
         for action in range(self.mdp.num_of_actions):
             row_indices, col_indices, transition_probabilities = find(p_mats[action])
