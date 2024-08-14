@@ -61,8 +61,9 @@ class BlockchainMDP:
 
     def get_policy_induced_chain(self, policy: BlockchainModel.Policy) -> np.array:
         self.build_mdp()
-
-        return self.P.get_induced(policy)
+        policy_induced_chain = self.P.get_induced(policy)
+        print("Policy Induced Chain: ", policy_induced_chain)
+        return policy_induced_chain
 
     @staticmethod
     def policy_induced_chain_to_graph(policy_induced_chain: np.array) -> nx.DiGraph:
@@ -92,8 +93,17 @@ class BlockchainMDP:
         policy_induced_chain[self.final_state_index, self.final_state_index] = 0
 
         steady_prob = self.calc_steady_distribution(policy_induced_chain)
+        print("Steady Probabilities: ", steady_prob)
+        print("Number of Steady Probabilities: ", len(steady_prob))
 
         state_reward, blocks_advanced = self.get_policy_induced_chain_state_reward(policy, policy_induced_chain)
+        print("State Rewards: ", state_reward)
+        print("Number of State Rewards: ", len(blocks_advanced))
+        print("Blocks Advanced: ", blocks_advanced)
+        print("Blocks Advanced contains {} blocks".format(len(blocks_advanced)))
+
+        if self.dot(blocks_advanced, steady_prob) == 0:
+            return self.dot(state_reward, steady_prob)
 
         return self.dot(state_reward, steady_prob) / self.dot(blocks_advanced, steady_prob)
 
@@ -102,6 +112,7 @@ class BlockchainMDP:
         v = null_space(np.eye(policy_induced_chain.shape[0]) - np.transpose(policy_induced_chain)).flatten()
         steady_prob = np.real_if_close(v)
         steady_prob = steady_prob / np.sum(steady_prob)
+        print("Steady State Probabilities: ", steady_prob)
         return steady_prob
 
     @staticmethod

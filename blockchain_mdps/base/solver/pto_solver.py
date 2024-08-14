@@ -23,9 +23,26 @@ class PTOSolver(BlockchainMDPSolver):
         p_mat, r_mat = self.get_pt_mdp()
         vi = mdptoolbox.PolicyIteration(p_mat, r_mat, discount=discount, epsilon=epsilon, max_iter=max_iter,
                                         skip_check=skip_check)
+        for action in range(len(p_mat)):
+            print(f"Transition matrix for action {action}:")
+            print(p_mat[action])
+            print(f"Reward matrix for action {action}:")
+            print(r_mat[action])
+
         if verbose:
             vi.setVerbose()
-        vi.run()
+
+        try:
+            vi.run()
+        except np.linalg.LinAlgError as e:
+            print(f"Singular matrix error during policy iteration: {e}")
+            for action in range(len(p_mat)):
+                if isinstance(p_mat[action], np.ndarray):
+                    print(f"Action {action} - Transition probabilities matrix (dense):")
+                    print(p_mat[action])
+                else:
+                    print(f"Action {action} - Transition probabilities matrix (sparse):")
+            raise e
 
         return vi.policy, vi.V[self.mdp.initial_state_index] / self.expected_horizon, vi.iter, vi.V
 
@@ -38,6 +55,11 @@ class PTOSolver(BlockchainMDPSolver):
     def get_pt_mdp_dense(self) -> Tuple[np.array, np.array]:
         p_mat = np.multiply(np.power(1 - 1 / self.expected_horizon, self.mdp.D.get_data()), self.mdp.P.get_data())
         p_mat[:, :, self.mdp.final_state_index] = 0
+        print("Dense Transition Matrix:")
+        print(p_mat)
+        print("Reward Matrix:")
+        print(self.mdp.R.get_data())
+
         return p_mat, self.mdp.R.get_data()
 
     def get_pt_mdp_sparse(self) -> Tuple[List[spmatrix], List[spmatrix]]:

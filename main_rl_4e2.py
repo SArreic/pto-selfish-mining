@@ -1,15 +1,18 @@
 import argparse
+import itertools
 import signal
 import sys
 from pathlib import Path
-from typing import Tuple, Any
+from typing import Tuple, Any, List, Type
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from numpy import single
 
 from blockchain_mdps import *
+from blockchain_mdps.base.blockchain_mdps.blockchain_mdp import BlockchainMDP
 from blockchain_mdps.ethereum2_fee_model import Ethereum2FeeModel
 from blockchain_mdps.ethereum2_model import Ethereum2Model
 from blockchain_mdps.base.solver.pto_solver_modified import PTOSolverM
@@ -31,12 +34,61 @@ def interrupt_handler(signum: int, frame: Any) -> None:
 def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
     expected_horizon = int(1e4)
     solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10)) # Sigular Matrix Detected Here
+    p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10))  # Singular Matrix Detected Here
     sys.stdout.flush()
     revenue = solver.mdp.calc_policy_revenue(p)
-    # if np.iscomplex(revenue):
-    #     revenue = revenue.real
     return np.float32(revenue), p
+
+
+def solve_mdp_randomly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
+    np.random.seed(42)  # For reproducibility
+    expected_horizon = int(1)
+    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
+    policy = tuple(np.random.choice(solver.mdp.num_of_actions) for _ in range(solver.mdp.num_of_states))
+    revenue = solver.mdp.calc_policy_revenue(policy)
+    return np.float32(revenue), policy
+
+
+def solve_mdp_greedily(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
+    expected_horizon = int(1e1)
+    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
+    policy = []
+    for state in range(solver.mdp.num_of_states):
+        best_action = None
+        best_reward = -np.inf
+        for action in range(solver.mdp.num_of_actions):
+            reward = solver.mdp.R.get_val(action, state, state)
+            if reward > best_reward:
+                best_reward = reward
+                best_action = action
+        policy.append(best_action)
+    policy = Tuple[np.array(policy)]
+    revenue = solver.mdp.calc_policy_revenue(policy)
+    return np.float32(revenue), tuple(policy)
+
+
+def solve_mdp_brute_force(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
+    expected_horizon = int(1)
+    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
+    best_policy = None
+    best_revenue = -np.inf
+    for policy in itertools.product(range(solver.mdp.num_of_actions), repeat=solver.mdp.num_of_states):
+        revenue = solver.mdp.calc_policy_revenue(policy)
+        if revenue > best_revenue:
+            best_revenue = revenue
+            best_policy = policy
+    return np.float32(best_revenue), best_policy
+
+
+def solve_mdp_approx(mdp: BlockchainModel, method: str = 'greedy') -> Tuple[float, BlockchainModel.Policy]:
+    if method == 'random':
+        return solve_mdp_randomly(mdp)
+    elif method == 'greedy':
+        return solve_mdp_greedily(mdp)
+    elif method == 'brute':
+        return solve_mdp_brute_force(mdp)
+    else:
+        raise ValueError("Unknown method: choose from 'random', 'greedy', 'brute_force'.")
 
 
 def log_solution_info(mdp: BlockchainModel, rev: float, trainer: Trainer) -> float:
@@ -248,6 +300,7 @@ def run_mcts_fees(args: argparse.Namespace):
     transaction_chance = args.delta
     # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_stake_pool=max_fork)
+    # rev, _ = solve_mdp_approx(simple_mdp, method='random')
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
     print("The best policy is {}".format(_))
