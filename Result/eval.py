@@ -126,5 +126,5 @@ def compare_files(file_paths):
     plot_comparison(all_stats, 'Base Value Approximation')
 
 
-file_paths = ['btc_res.txt', 'eth_res.txt']
+file_paths = []
 compare_files(file_paths)

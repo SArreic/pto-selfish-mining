@@ -12,10 +12,11 @@ import seaborn as sns
 from numpy import single
 
 from blockchain_mdps import *
+from blockchain_mdps.avalanche_fee_model import EthereumPosModel
+from blockchain_mdps.avalanche_model import AvalancheAttackModel
 from blockchain_mdps.base.blockchain_mdps.blockchain_mdp import BlockchainMDP
 from blockchain_mdps.ethereum2_fee_model import Ethereum2FeeModel
 from blockchain_mdps.ethereum2_model import Ethereum2Model
-from blockchain_mdps.base.solver.pto_solver_modified import PTOSolverM
 from reinforcement_learning import *
 # noinspection PyUnusedLocal
 from reinforcement_learning.base.training.callbacks.bva_callback import BVACallback
@@ -299,16 +300,19 @@ def run_mcts_fees(args: argparse.Namespace):
     fee = args.fee
     transaction_chance = args.delta
     # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
-    simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_stake_pool=max_fork)
+    # simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_stake_pool=max_fork)
+    simple_mdp = AvalancheAttackModel(alpha=alpha, beta=gamma, max_depth=max_fork, max_forks=max_fork)
     # rev, _ = solve_mdp_approx(simple_mdp, method='random')
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
     print("The best policy is {}".format(_))
     rev = rev if -1 <= rev <= 1 else (-1 if rev < -1 else 1)
-    mdp = Ethereum2FeeModel(alpha=alpha, gamma=gamma, max_pool=max_fork,
-                            max_fee_pool=max_fork, max_proposals=max_fork,
-                            max_stake_pool=max_fork, max_votes=max_fork,
-                            network_congestion=0)
+    # mdp = Ethereum2FeeModel(alpha=alpha, gamma=gamma, max_pool=max_fork,
+    #                         max_fee_pool=max_fork, max_proposals=max_fork,
+    #                         max_stake_pool=max_fork, max_votes=max_fork,
+    #                         network_congestion=0)
+    mdp = EthereumPosModel(alpha=alpha, beta=gamma, gamma=gamma, max_fork=max_fork, max_pool=max_fork,
+                           transaction_chance=gamma)
 
     smart_init = rev * (1 + fee * transaction_chance)
     print("rev is {}, fee is {}, transaction chance is {}".format(rev, fee, transaction_chance))
