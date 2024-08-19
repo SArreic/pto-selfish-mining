@@ -36,10 +36,13 @@ class AvalancheAttackModel(BlockchainModel):
             (0, self.max_forks),  # Number of forks
             (0, self.max_depth * (self.max_forks + 1))  # Total weight (sum of all chain depths)
         )
+        print(f"Underlying space size: {underlying_space.size}")
         return DefaultValueSpace(underlying_space, self.get_final_state())
 
     def get_action_space(self) -> Space:
-        return DiscreteSpace(self.Action)
+        action_space = DiscreteSpace(self.Action)
+        print(f"Action space size: {action_space.size}")
+        return action_space
 
     def get_initial_state(self) -> BlockchainModel.State:
         # Start with main chain depth of 0, active chain is main, no forks, total weight = 0
@@ -67,6 +70,9 @@ class AvalancheAttackModel(BlockchainModel):
                 probability=self.alpha if active_chain == 0 else self.beta,
                 reward=1
             )
+            print(
+                f"Next final state: {(*new_chain_depths, active_chain, num_forks, new_total_weight)}"
+                f", Probability: {self.alpha if active_chain == 0 else self.beta}, Reward: {1}")
 
         elif action is self.Action.CreateFork:
             if num_forks < self.max_forks:
@@ -77,6 +83,14 @@ class AvalancheAttackModel(BlockchainModel):
                     probability=self.beta,
                     reward=0.5
                 )
+                print(
+                    f"Next final state: {(*new_chain_depths, num_forks + 1, num_forks + 1, new_total_weight)}"
+                    f", Probability: {self.beta}, Reward: {0.5}")
+
+            else:
+                transitions.add(self.final_state, probability=1, reward=0)
+                print(
+                    f"Next final state: {self.final_state}, Probability: 1, Reward: {0}")
 
         elif action is self.Action.SwitchChain:
             best_chain = 0  # Default to main chain
@@ -91,6 +105,14 @@ class AvalancheAttackModel(BlockchainModel):
                     probability=self.beta,
                     reward=1
                 )
+                print(
+                    f"Next final state: {(*chain_depths, best_chain, num_forks, total_weight)}"
+                    f", Probability: {self.beta}, Reward: {1}")
+
+            else:
+                transitions.add(self.final_state, probability=1, reward=0)
+                print(
+                    f"Next final state: {self.final_state}, Probability: 1, Reward: {0}")
 
         elif action is self.Action.PublishFork:
             reward = 0.75
@@ -99,6 +121,9 @@ class AvalancheAttackModel(BlockchainModel):
                 probability=1,
                 reward=reward
             )
+            print(
+                f"Next final state: {(*chain_depths, active_chain, num_forks, total_weight)}"
+                f", Probability: {1}, Reward: {reward}")
 
         return transitions
 
