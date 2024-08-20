@@ -295,13 +295,14 @@ def run_mcts(args: argparse.Namespace):
 
 def run_mcts_fees(args: argparse.Namespace):
     alpha = args.alpha
+    beta = args.beta
     gamma = args.gamma
     max_fork = args.max_fork
     fee = args.fee
     transaction_chance = args.delta
     # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     # simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_stake_pool=max_fork)
-    simple_mdp = AvalancheAttackModel(alpha=alpha, beta=gamma, max_depth=max_fork, max_forks=max_fork)
+    simple_mdp = AvalancheAttackModel(alpha=alpha, beta=beta, max_forks=max_fork, max_depth=max_fork * 2)
     # rev, _ = solve_mdp_approx(simple_mdp, method='random')
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
@@ -375,7 +376,9 @@ if __name__ == '__main__':
     parser.add_argument('--no_bg', help='don\'t run the process in the background', action='store_false')
     parser.add_argument('--bind_all', help='pass bind_all to tensorboard', action='store_true')
     parser.add_argument('--load_experiment', help='name of experiment to continue', default=None)
-    parser.add_argument('--alpha', help='miner size', default=0.01, type=float)
+    # parser.add_argument('--alpha', help='miner size', default=0.01, type=float)
+    parser.add_argument('--alpha', help='honest rate', default=0.4, type=float)
+    parser.add_argument('--beta', help='attacker rate', default=0.6, type=float)
     parser.add_argument('--gamma', help='rushing factor', default=0.95, type=float)
     parser.add_argument('--max_fork', help='maximal fork size', default=5, type=int)
     parser.add_argument('--fee', help='transaction fee', default=10, type=float)
