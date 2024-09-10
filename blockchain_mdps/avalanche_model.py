@@ -17,7 +17,7 @@ class AvalancheAttackModel(BlockchainModel):
         self.beta = beta  # Attacker proportion
         self.max_forks = max_forks  # Maximum number of fork chains
 
-        self.Action = self.create_int_enum('Action', ['AddBlock', 'CreateFork', 'SwitchChain', 'PublishFork'])
+        self.Action = self.create_int_enum('Action', ['AddBlock', 'CreateFork', 'PublishFork'])
 
         super().__init__()
 
@@ -68,7 +68,7 @@ class AvalancheAttackModel(BlockchainModel):
                 transitions.add(
                     (main_chain_depth + 1, honest_chain_depth + 1, num_forks),
                     probability=1,
-                    reward=0  # Set reward to 0
+                    reward=0.2  # Set reward to 0
                 )
 
         elif action is self.Action.CreateFork:
@@ -80,39 +80,46 @@ class AvalancheAttackModel(BlockchainModel):
                 transitions.add(
                     (main_chain_depth, honest_chain_depth + 1, num_forks + 1),  # Creating a new fork
                     probability=1,
-                    reward=0  # Set reward to 0
-                )
-            else:
-                transitions.add(self.final_state, probability=1, reward=0)
-
-        elif action is self.Action.SwitchChain:
-            if main_chain_depth <= 0 < num_forks:
-                # No reward for switching chain
-                transitions.add(
-                    (1, honest_chain_depth, num_forks - 1),  # Switching to a longer chain
-                    probability=self.beta,
-                    reward=0  # Set reward to 0
+                    reward=0.8  # Set reward to 0
                 )
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
 
         elif action is self.Action.PublishFork:
-            attack_weight = (main_chain_depth + 1.5 * num_forks) * self.beta
-            honest_weight = honest_chain_depth * self.alpha
+            attack_weight = (main_chain_depth + 1.5 * num_forks)
+            honest_weight = honest_chain_depth
             new_length = min(main_chain_depth, honest_chain_depth)
+            new_main_chain_depth = max(0, main_chain_depth - new_length)
 
             if attack_weight > honest_weight:
-                transitions.add(
-                    (main_chain_depth - new_length, honest_chain_depth - new_length, num_forks),
-                    probability=1,
-                    reward=new_length
-                )
+                if new_main_chain_depth == 0 and num_forks > 0:
+                    # Switch to the longest fork
+                    transitions.add(
+                        (1, honest_chain_depth - new_length, num_forks - 1),
+                        probability=1,
+                        reward=new_length
+                    )
+                else:
+                    transitions.add(
+                        (new_main_chain_depth, honest_chain_depth - new_length, num_forks),
+                        probability=1,
+                        reward=new_length
+                    )
             else:
-                transitions.add(
-                    (main_chain_depth - new_length, honest_chain_depth - new_length, num_forks),
-                    probability=1,
-                    reward=0
-                )
+                if new_main_chain_depth == 0 and num_forks > 0:
+                    # Switch to the longest fork
+                    transitions.add(
+                        (1, honest_chain_depth - new_length, num_forks - 1),
+                        probability=1,
+                        reward=new_length
+                    )
+                else:
+                    transitions.add(
+                        (new_main_chain_depth, honest_chain_depth - new_length, num_forks),
+                        probability=1,
+                        reward=0
+                    )
+
         return transitions
 
     def get_honest_revenue(self) -> float:
@@ -131,7 +138,7 @@ class AvalancheAttackModel(BlockchainModel):
             if active_chain == 0:
                 action = self.Action.AddBlock
             else:
-                action = self.Action.SwitchChain
+                action = self.Action.PublishFork
 
             policy[i] = action
 
@@ -144,7 +151,7 @@ class AvalancheAttackModel(BlockchainModel):
             active_chain, num_forks, total_weight = self.state_space.index_to_element(i)
 
             if active_chain != 0:
-                action = self.Action.SwitchChain
+                action = self.Action.PublishFork
             elif num_forks < self.max_forks:
                 action = self.Action.CreateFork
             else:
@@ -153,6 +160,7 @@ class AvalancheAttackModel(BlockchainModel):
             policy[i] = action
 
         return tuple(policy)
+
 
 
 if __name__ == '__main__':
