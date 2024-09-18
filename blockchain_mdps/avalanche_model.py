@@ -11,13 +11,15 @@ from .base.state_transitions import StateTransitions
 
 
 class AvalancheAttackModel(BlockchainModel):
-    def __init__(self, alpha: float, beta: float, max_forks: int, max_depth: int):
-        self.max_depth = max_depth
+    def __init__(self, alpha: float, beta: float, max_depth: int, max_forks: int, tax: float, pool: float):
+        self.max_depth = max_depth  # Maximum depth for
         self.alpha = alpha  # Honest validators proportion
         self.beta = beta  # Attacker proportion
-        self.max_forks = max_forks  # Maximum number of fork chains
+        self.max_forks = max_forks  # Maximum number of fork chains per user
+        self.tax = tax  # tax of block reward
+        self.max_pool = pool
 
-        self.Action = self.create_int_enum('Action', ['AddBlock', 'CreateFork', 'PublishFork'])
+        self.Action = self.create_int_enum('Action', ['AddBlock', 'CreateFork'])
 
         super().__init__()
 
@@ -30,9 +32,11 @@ class AvalancheAttackModel(BlockchainModel):
     def get_state_space(self) -> Space:
         # State: (main_chain_depth, active_chain_index, num_forks)
         underlying_space = MultiDimensionalDiscreteSpace(
-            (0, self.max_depth),  # Main chain depth
-            (0, self.max_depth),  # Honest chain depth
-            (0, self.max_forks)  # Number of forks
+            (0, self.max_depth),  # User main chain depth
+            (0, self.max_forks),  # Number of user forks
+            (0, self.max_depth * 1e3),  # System main chain depth
+            (0, self.max_forks * 1e2),  # Number of system forks
+            (0, self.max_pool)  # Maximum number of security reward pool
         )
         print(f"Underlying space size: {underlying_space.size}")
         return DefaultValueSpace(underlying_space, self.get_final_state())
@@ -44,10 +48,10 @@ class AvalancheAttackModel(BlockchainModel):
 
     def get_initial_state(self) -> BlockchainModel.State:
         # Start with main chain depth of 0, active chain is main, no forks
-        return 0, 0, 0
+        return 0, 0, 0, 0, 0
 
     def get_final_state(self) -> BlockchainModel.State:
-        return -1, -1, -1
+        return -1, -1, -1, -1, -1
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:
@@ -57,68 +61,44 @@ class AvalancheAttackModel(BlockchainModel):
             transitions.add(self.final_state, probability=1)
             return transitions
 
-        main_chain_depth, honest_chain_depth, num_forks = state
+        main_chain_depth, num_forks, sys_main_chain_depth, sys_num_forks, reward_pool = state
+
+        weight = (num_forks * 0.8 + main_chain_depth * 0.5) / (main_chain_depth + num_forks)
 
         if action is self.Action.AddBlock:
-            if main_chain_depth >= self.max_depth or honest_chain_depth >= self.max_depth:
+            new_num_forks = max(num_forks - 1, 0)
+            new_pool = min(reward_pool + self.tax, self.max_pool)
+            if main_chain_depth >= self.max_depth or main_chain_depth <= 0:
                 # Chain has reached maximum depth, user must publish
                 transitions.add(self.final_state, probability=1, reward=0)
             else:
-                # No reward for adding block
-                transitions.add(
-                    (main_chain_depth + 1, honest_chain_depth + 1, num_forks),
-                    probability=1,
-                    reward=0.2  # Set reward to 0
-                )
+                transitions.add((main_chain_depth, new_num_forks, sys_main_chain_depth + 1, sys_num_forks,
+                                 new_pool),
+                                probability=weight, reward=main_chain_depth + 1 - self.tax)
+
+                # Only Basic reward for adding block
+                transitions.add((main_chain_depth + 1, new_num_forks, sys_main_chain_depth, sys_num_forks,
+                                 new_pool),
+                                probability=1 - weight,
+                                reward=1 - self.tax  # Set reward to 1 - tax
+                                )
 
         elif action is self.Action.CreateFork:
-            if main_chain_depth >= self.max_depth or honest_chain_depth >= self.max_depth:
-                # Chain has reached maximum depth, user must publish
-                transitions.add(self.final_state, probability=1, reward=0)
-            elif num_forks < self.max_forks:
+            if num_forks > 0 and main_chain_depth < 1:
+                main_chain_depth += 1
+                num_forks -= 1
+            new_main_chain_depth = max(main_chain_depth - 1, 0)
+            reward = reward_pool * (sys_main_chain_depth / (sys_main_chain_depth + sys_num_forks))
+            if num_forks < self.max_forks and main_chain_depth > 1:
                 # No reward for creating fork
                 transitions.add(
-                    (main_chain_depth, honest_chain_depth + 1, num_forks + 1),  # Creating a new fork
+                    (new_main_chain_depth, num_forks + 1, sys_main_chain_depth, sys_num_forks + 1,
+                     reward_pool - reward),  # Creating a new fork
                     probability=1,
-                    reward=0.8  # Set reward to 0
+                    reward=reward
                 )
             else:
                 transitions.add(self.final_state, probability=1, reward=0)
-
-        elif action is self.Action.PublishFork:
-            attack_weight = (main_chain_depth + 1.5 * num_forks)
-            honest_weight = honest_chain_depth
-            new_length = min(main_chain_depth, honest_chain_depth)
-            new_main_chain_depth = max(0, main_chain_depth - new_length)
-
-            if attack_weight > honest_weight:
-                if new_main_chain_depth == 0 and num_forks > 0:
-                    # Switch to the longest fork
-                    transitions.add(
-                        (1, honest_chain_depth - new_length, num_forks - 1),
-                        probability=1,
-                        reward=new_length
-                    )
-                else:
-                    transitions.add(
-                        (new_main_chain_depth, honest_chain_depth - new_length, num_forks),
-                        probability=1,
-                        reward=new_length
-                    )
-            else:
-                if new_main_chain_depth == 0 and num_forks > 0:
-                    # Switch to the longest fork
-                    transitions.add(
-                        (1, honest_chain_depth - new_length, num_forks - 1),
-                        probability=1,
-                        reward=new_length
-                    )
-                else:
-                    transitions.add(
-                        (new_main_chain_depth, honest_chain_depth - new_length, num_forks),
-                        probability=1,
-                        reward=0
-                    )
 
         return transitions
 
@@ -135,10 +115,7 @@ class AvalancheAttackModel(BlockchainModel):
         for i in range(self.state_space.size):
             active_chain, num_forks, total_weight = self.state_space.index_to_element(i)
 
-            if active_chain == 0:
-                action = self.Action.AddBlock
-            else:
-                action = self.Action.PublishFork
+            action = self.Action.AddBlock
 
             policy[i] = action
 
@@ -151,16 +128,13 @@ class AvalancheAttackModel(BlockchainModel):
             active_chain, num_forks, total_weight = self.state_space.index_to_element(i)
 
             if active_chain != 0:
-                action = self.Action.PublishFork
-            elif num_forks < self.max_forks:
                 action = self.Action.CreateFork
             else:
-                action = self.Action.PublishFork
+                action = self.Action.AddBlock
 
             policy[i] = action
 
         return tuple(policy)
-
 
 
 if __name__ == '__main__':
