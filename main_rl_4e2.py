@@ -298,26 +298,20 @@ def run_mcts_fees(args: argparse.Namespace):
     beta = args.beta
     gamma = args.gamma
     max_fork = args.max_fork
-    max_depth = args.max_depth
-    tax = args.tax
     fee = args.fee
     pool = args.pool
+    clock = args.clock
     transaction_chance = args.delta
-    # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
-    # simple_mdp = Ethereum2Model(alpha=alpha, gamma=gamma, max_stake_pool=max_fork)
-    simple_mdp = AvalancheAttackModel(alpha=alpha, beta=beta, max_forks=max_fork, max_depth=max_depth,
-                                      tax=tax, pool=args.pool)
+    simple_mdp = AvalancheAttackModel(alpha=alpha, gamma=beta, max_forks=max_fork, fee=fee, pool=pool,
+                                      clock=clock)
     # rev, _ = solve_mdp_approx(simple_mdp, method='random')
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
     print("The best policy is {}".format(_))
     rev = rev if -1 <= rev <= 1 else (-1 if rev < -1 else 1)
-    # mdp = Ethereum2FeeModel(alpha=alpha, gamma=gamma, max_pool=max_fork,
-    #                         max_fee_pool=max_fork, max_proposals=max_fork,
-    #                         max_stake_pool=max_fork, max_votes=max_fork,
-    #                         network_congestion=0)
-    mdp = EthereumPosModel(alpha=alpha, beta=gamma, gamma=gamma, max_fork=max_fork, max_pool=max_fork,
-                           transaction_chance=gamma)
+    mdp = EthereumPosModel(alpha=alpha, gamma=gamma, clock=clock, fee=fee, max_forks=max_fork, pool=pool)
+
+    # mdp = Ethereum2FeeModel()
 
     smart_init = rev * (1 + fee * transaction_chance)
     print("rev is {}, fee is {}, transaction chance is {}".format(rev, fee, transaction_chance))
@@ -384,11 +378,12 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', help='honest rate', default=0.4, type=float)
     parser.add_argument('--beta', help='attacker rate', default=0.6, type=float)
     parser.add_argument('--gamma', help='rushing factor', default=0.95, type=float)
-    parser.add_argument('--max_depth', help='maximum depth of user chain', default=5, type=int)
+    # parser.add_argument('--max_depth', help='maximum depth of user chain', default=5, type=int)
     parser.add_argument('--max_fork', help='maximal fork size', default=5, type=int)
-    parser.add_argument('--tax', help='tax raised for each block', default=0.2, type=float)
-    parser.add_argument('--pool', help='reward pool for security improvements', default=5, type=float)
-    parser.add_argument('--fee', help='transaction fee', default=10, type=float)
+    # parser.add_argument('--tax', help='tax raised for each block', default=0.1, type=float)
+    parser.add_argument('--pool', help='reward pool for security improvements', default=0, type=float)
+    parser.add_argument('--clock', help='clock for each epoch', default=10, type=float)
+    parser.add_argument('--fee', help='transaction fee', default=0.1, type=float)
     parser.add_argument('--delta', help='chance for a transaction', default=0.01, type=float)
     parser.add_argument('--seed', help='random seed', default=0, type=int)
     parser.add_argument('--lr', help='learning_rate', default=2e-4, type=float)
