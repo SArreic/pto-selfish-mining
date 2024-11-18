@@ -1,25 +1,21 @@
 import argparse
-import itertools
 import signal
 import sys
 from pathlib import Path
-from typing import Tuple, Any, List, Type
+from typing import Tuple, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from numpy import single
 
 from blockchain_mdps import *
-from blockchain_mdps.avalanche_fee_model import EthereumPosModel
-from blockchain_mdps.avalanche_model import AvalancheAttackModel
-from blockchain_mdps.base.blockchain_mdps.blockchain_mdp import BlockchainMDP
-from blockchain_mdps.ethereum2_fee_model import Ethereum2FeeModel
-from blockchain_mdps.ethereum2_model import Ethereum2Model
+from blockchain_mdps.ethereum_pos_model import EthereumPoSModel
+from blockchain_mdps.ethereum_user_model import EthereumUserModel
 from reinforcement_learning import *
 # noinspection PyUnusedLocal
 from reinforcement_learning.base.training.callbacks.bva_callback import BVACallback
+from reinforcement_learning.SAC.sac_trainer import SACTrainer
 
 
 # from rl_log_to_graph import create_performance_figure, create_q_values_graph, create_speed_graph
@@ -35,61 +31,9 @@ def interrupt_handler(signum: int, frame: Any) -> None:
 def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
     expected_horizon = int(1e4)
     solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10))  # Singular Matrix Detected Here
+    p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10))
     sys.stdout.flush()
-    revenue = solver.mdp.calc_policy_revenue(p)
-    return np.float32(revenue), p
-
-
-def solve_mdp_randomly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
-    np.random.seed(42)  # For reproducibility
-    expected_horizon = int(1)
-    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    policy = tuple(np.random.choice(solver.mdp.num_of_actions) for _ in range(solver.mdp.num_of_states))
-    revenue = solver.mdp.calc_policy_revenue(policy)
-    return np.float32(revenue), policy
-
-
-def solve_mdp_greedily(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
-    expected_horizon = int(1e1)
-    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    policy = []
-    for state in range(solver.mdp.num_of_states):
-        best_action = None
-        best_reward = -np.inf
-        for action in range(solver.mdp.num_of_actions):
-            reward = solver.mdp.R.get_val(action, state, state)
-            if reward > best_reward:
-                best_reward = reward
-                best_action = action
-        policy.append(best_action)
-    policy = Tuple[np.array(policy)]
-    revenue = solver.mdp.calc_policy_revenue(policy)
-    return np.float32(revenue), tuple(policy)
-
-
-def solve_mdp_brute_force(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
-    expected_horizon = int(1)
-    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    best_policy = None
-    best_revenue = -np.inf
-    for policy in itertools.product(range(solver.mdp.num_of_actions), repeat=solver.mdp.num_of_states):
-        revenue = solver.mdp.calc_policy_revenue(policy)
-        if revenue > best_revenue:
-            best_revenue = revenue
-            best_policy = policy
-    return np.float32(best_revenue), best_policy
-
-
-def solve_mdp_approx(mdp: BlockchainModel, method: str = 'greedy') -> Tuple[float, BlockchainModel.Policy]:
-    if method == 'random':
-        return solve_mdp_randomly(mdp)
-    elif method == 'greedy':
-        return solve_mdp_greedily(mdp)
-    elif method == 'brute':
-        return solve_mdp_brute_force(mdp)
-    else:
-        raise ValueError("Unknown method: choose from 'random', 'greedy', 'brute_force'.")
+    return np.float32(solver.mdp.calc_policy_revenue(p)), p
 
 
 def log_solution_info(mdp: BlockchainModel, rev: float, trainer: Trainer) -> float:
@@ -124,7 +68,7 @@ def solve_pt(args: argparse.Namespace) -> None:
 
     trainer.run()
 
-    log_solution_info(mdp, rev, trainer)
+    # log_solution_info(mdp, rev, trainer)
 
 
 def solve_pt_multiple_times(args: argparse.Namespace, times: int = 10) -> None:
@@ -295,70 +239,36 @@ def run_mcts(args: argparse.Namespace):
 
 def run_mcts_fees(args: argparse.Namespace):
     alpha = args.alpha
-    beta = args.beta
     gamma = args.gamma
     max_fork = args.max_fork
     fee = args.fee
-    pool = args.pool
-    clock = args.clock
     transaction_chance = args.delta
-    simple_mdp = AvalancheAttackModel(alpha=alpha, gamma=beta, max_forks=max_fork, fee=fee, pool=pool,
-                                      clock=clock)
-    # rev, _ = solve_mdp_approx(simple_mdp, method='random')
+    # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
+    # simple_mdp = EthereumModel(alpha=alpha, max_fork=max_fork)
+    simple_mdp = EthereumUserModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
     print("The best policy is {}".format(_))
-    rev = rev if -1 <= rev <= 1 else (-1 if rev < -1 else 1)
-    mdp = EthereumPosModel(alpha=alpha, gamma=gamma, clock=clock, fee=fee, max_forks=max_fork, pool=pool,
-                           transaction_chance=transaction_chance)
-
-    # mdp = Ethereum2FeeModel()
-
+    # mdp = BitcoinFeeModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
+    #                       max_pool=max_fork)
+    mdp = EthereumPoSModel(alpha=alpha, gamma=gamma, max_fork=max_fork, transaction_chance=transaction_chance,
+                           max_pool=max_fork)
+    # mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     smart_init = rev * (1 + fee * transaction_chance)
-    print("rev is {}, fee is {}, transaction chance is {}".format(rev, fee, transaction_chance))
-    print("smart_init is {}".format(smart_init))
     # smart_init = None
-
     print(f'{mdp.state_space.size:,}')
 
-    trainer = MCTSTrainer(
-        mdp,
-        orchestrator_type='synced_multi_process',
-        build_info=args.build_info,
-        output_root=args.output_root,
-        output_profile=False,
-        output_memory_snapshots=False,
-        random_seed=args.seed,
-        expected_horizon=10_000,
-        depth=5,
-        batch_size=100,
-        dropout=0,
-        length_factor=10,
-        starting_epsilon=0.05,
-        epsilon_step=0,
-        bva_smart_init=smart_init,
-        prune_tree_rate=250,
-        num_of_episodes_for_average=1000,
-        learning_rate=args.lr,
-        nn_factor=0.0001,
-        mc_simulations=25,
-        num_of_epochs=5001,
-        epoch_shuffles=2,
-        save_rate=100,
-        use_base_approximation=True,
-        ground_initial_state=False,
-        train_episode_length=100,
-        evaluate_episode_length=100,
-        lr_decay_epoch=1000,
-        number_of_training_agents=args.train_agents,
-        number_of_evaluation_agents=args.eval_agents,
-        lower_priority=args.no_bg,
-        bind_all=args.bind_all,
-        load_experiment=args.load_experiment,
-        output_value_heatmap=False,
-        normalize_target_values=True,
-        use_cached_values=False
-    )
+    trainer = MCTSTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info,
+                          output_root=args.output_root, output_profile=False, output_memory_snapshots=False,
+                          random_seed=args.seed, expected_horizon=10_000, depth=5, batch_size=100, dropout=0,
+                          length_factor=10, starting_epsilon=0.05, epsilon_step=0, bva_smart_init=smart_init,
+                          prune_tree_rate=250, num_of_episodes_for_average=1000, learning_rate=args.lr,
+                          nn_factor=0.0001, mc_simulations=25, num_of_epochs=5001, epoch_shuffles=2, save_rate=100,
+                          use_base_approximation=True, ground_initial_state=False,
+                          train_episode_length=100, evaluate_episode_length=100, lr_decay_epoch=1000,
+                          number_of_training_agents=args.train_agents, number_of_evaluation_agents=args.eval_agents,
+                          lower_priority=args.no_bg, bind_all=args.bind_all, load_experiment=args.load_experiment,
+                          output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
 
     trainer.run()
 
@@ -375,18 +285,11 @@ if __name__ == '__main__':
     parser.add_argument('--no_bg', help='don\'t run the process in the background', action='store_false')
     parser.add_argument('--bind_all', help='pass bind_all to tensorboard', action='store_true')
     parser.add_argument('--load_experiment', help='name of experiment to continue', default=None)
-    # parser.add_argument('--alpha', help='miner size', default=0.01, type=float)
-    parser.add_argument('--alpha', help='honest rate', default=0.4, type=float)
-    parser.add_argument('--beta', help='attacker rate', default=0.6, type=float)
-    parser.add_argument('--gamma', help='rushing factor', default=0.95, type=float)
-    # parser.add_argument('--max_depth', help='maximum depth of user chain', default=5, type=int)
-    parser.add_argument('--max_fork', help='maximal fork size', default=5, type=int)
-    # parser.add_argument('--tax', help='tax raised for each block', default=0.1, type=float)
-    parser.add_argument('--pool', help='reward pool for security improvements', default=0, type=float)
-    parser.add_argument('--clock', help='clock for each epoch', default=10, type=float)
-    parser.add_argument('--fee', help='transaction fee', default=0.1, type=float)
-    # parser.add_argument('--delta', help='chance for a transaction', default=0.01, type=float)
-    parser.add_argument('--delta', help='chance for a transaction', default=0.05, type=float)
+    parser.add_argument('--alpha', help='miner size', default=0.35, type=float)
+    parser.add_argument('--gamma', help='rushing factor', default=0.5, type=float)
+    parser.add_argument('--max_fork', help='maximal fork size', default=10, type=int)
+    parser.add_argument('--fee', help='transaction fee', default=10, type=float)
+    parser.add_argument('--delta', help='chance for a transaction', default=0.01, type=float)
     parser.add_argument('--seed', help='random seed', default=0, type=int)
     parser.add_argument('--lr', help='learning_rate', default=2e-4, type=float)
 

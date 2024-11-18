@@ -11,12 +11,13 @@ from .base.state_transitions import StateTransitions
 
 
 class EthereumPosModel(BlockchainModel):
-    def __init__(self, alpha: float, gamma: float, clock: int, max_forks: int, fee: float, pool: float):
+    def __init__(self, alpha: float, gamma: float, clock: int, max_forks: int, fee: float, pool: float, transaction_chance: float):
         self.alpha = alpha  # Honest validators' proportion
         self.gamma = gamma  # Attacker's proportion
         self.max_forks = max_forks  # Maximum number of forks per user
         self.max_sys_forks = int(max_forks * 1e1)
         self.fee = fee  # Tax of block reward
+        self.transaction_chance = transaction_chance
         self.pool = pool  # Total pool of rewards
         self.clock = clock
 
@@ -28,10 +29,12 @@ class EthereumPosModel(BlockchainModel):
 
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}'
-                f'({self.alpha}, {self.gamma}, {self.max_forks}, {self.fee}, {self.pool}, {self.clock})')
+                f'({self.alpha}, {self.gamma}, {self.max_forks}, {self.fee}, {self.pool}, {self.clock}, '
+                f'{self.transaction_chance})')
 
     def __reduce__(self) -> Tuple[type, tuple]:
-        return self.__class__, (self.alpha, self.gamma, self.max_forks, self.fee, self.pool, self.clock)
+        return self.__class__, (self.alpha, self.gamma, self.max_forks, self.fee, self.pool, self.clock,
+                                self.transaction_chance)
 
     def get_state_space(self) -> Space:
         """
@@ -45,7 +48,7 @@ class EthereumPosModel(BlockchainModel):
             (0, self.max_sys_forks),   # 系统分叉数
             (0, int(self.clock))       # 安全奖励池的最大值
         )
-        print(f"Underlying space size: {underlying_space.size}")
+        # print(f"Underlying space size: {underlying_space.size}")
         return DefaultValueSpace(underlying_space, self.get_final_state())
 
     def get_action_space(self) -> Space:
@@ -56,7 +59,7 @@ class EthereumPosModel(BlockchainModel):
         - CreateFork: 创建分叉
         """
         action_space = DiscreteSpace(self.Action)
-        print(f"Action space size: {action_space.size}")
+        # print(f"Action space size: {action_space.size}")
         return action_space
 
     def get_initial_state(self) -> BlockchainModel.State:
@@ -92,32 +95,23 @@ class EthereumPosModel(BlockchainModel):
             return transitions
 
         if action is self.Action.AddBlock:
-            """
-            向主链添加区块行为：
-            - 如果用户分叉数达到了上限或者分叉数为负，强制发布区块
-            - 否则根据分叉数和系统分叉数进行区块添加
-            """
-            self.pool += self.fee
+            reward = self.block_reward * (1 + self.fee * self.transaction_chance)
+
             if num_forks >= self.max_forks or num_forks < 0:
                 transitions.add(self.final_state, probability=1, reward=0)
             else:
                 transitions.add((num_forks, sys_num_forks, clock - 1),
                                 probability=weight,
-                                reward=self.clock - clock - self.fee)
-
+                                reward=reward)
                 num_forks = min(num_forks + 1, self.max_forks)
                 transitions.add((num_forks, min(sys_num_forks + 1, self.max_sys_forks), clock - 1),
                                 probability=1 - weight,
-                                reward=1 - self.fee)
+                                reward=reward)
 
         elif action is self.Action.CreateFork:
-            """
-            创建分叉行为：
-            - 奖励与分叉差距相关，并从池中扣除对应金额
-            - 更新分叉状态
-            """
             reward = max(self.pool * (sys_num_forks - num_forks) / (sys_num_forks + 1), 0)
             self.pool -= reward
+
             sys_num_forks = min(sys_num_forks + 1, self.max_sys_forks)
             if 0 <= num_forks < self.max_forks:
                 transitions.add((num_forks + 1, sys_num_forks, clock - 1),
@@ -130,13 +124,13 @@ class EthereumPosModel(BlockchainModel):
 
     def get_honest_revenue(self) -> float:
         """
-        获取诚实节点的收益率，该值与 alpha 相关
+        获取诚实节点的收益率
         """
         return self.alpha * self.block_reward * (1 + self.fee)
 
     def is_policy_honest(self, policy: BlockchainModel.Policy) -> bool:
         """
-        判断策略是否是诚实的，默认从状态 (0, 0, 0) 开始
+        判断策略是否是诚实的，默认从状态 (0, 0, 0)
         """
         initial_state = (0, 0, 0)
         return policy[self.state_space.element_to_index(initial_state)] == self.Action.AddBlock
