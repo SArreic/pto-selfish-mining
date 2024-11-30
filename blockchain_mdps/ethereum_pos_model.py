@@ -1,10 +1,12 @@
 from typing import Tuple
 from enum import Enum
-from .base.base_space.default_value_space import DefaultValueSpace
-from .base.base_space.discrete_space import DiscreteSpace
-from .base.base_space.multi_dimensional_discrete_space import MultiDimensionalDiscreteSpace
-from .base.state_transitions import StateTransitions
-from .base.blockchain_model import BlockchainModel
+
+from blockchain_mdps import BitcoinFeeModel
+from blockchain_mdps.base.base_space.default_value_space import DefaultValueSpace
+from blockchain_mdps.base.base_space.discrete_space import DiscreteSpace
+from blockchain_mdps.base.base_space.multi_dimensional_discrete_space import MultiDimensionalDiscreteSpace
+from blockchain_mdps.base.state_transitions import StateTransitions
+from blockchain_mdps.base.blockchain_model import BlockchainModel
 
 
 class EthereumPoSModel(BlockchainModel):
@@ -47,23 +49,11 @@ class EthereumPoSModel(BlockchainModel):
 
     def dissect_state(self, state: BlockchainModel.State) -> Tuple[tuple, tuple, Enum, int, int, int, int, int]:
         """
-        解析状态，将状态分解为各个组成部分。
-        :param state: 当前状态
-        :return: 攻击者链、诚实节点链、分叉状态、交易池大小、攻击者链长度、诚实链长度、攻击者链交易数量、诚实链交易数量
+        Decompose the state into its constituent components.
         """
-        max_fork = self.max_fork
-        # 提取攻击者链和诚实节点链
-        a = state[:2 * max_fork]
-        h = state[2 * max_fork:4 * max_fork]
-
-        # 提取分叉状态和其他参数
-        fork = state[-6]
-        pool = state[-5]
-        length_a = state[-4]
-        length_h = state[-3]
-        transactions_a = state[-2]
-        transactions_h = state[-1]
-
+        a = state[:2 * self.max_fork]
+        h = state[2 * self.max_fork:4 * self.max_fork]
+        fork, pool, length_a, length_h, transactions_a, transactions_h = state[-6:]
         return a, h, fork, pool, length_a, length_h, transactions_a, transactions_h
 
     def create_empty_chain(self) -> tuple:
@@ -71,15 +61,12 @@ class EthereumPoSModel(BlockchainModel):
 
     def is_chain_valid(self, chain: tuple) -> bool:
         """
-        检查链的结构是否有效，包括长度和区块类型。
-        :param chain: 当前链，表示为 (Block, Transaction) 的元组列表
-        :return: 链是否合法（True 或 False）
+        Validate the structural integrity of a chain.
         """
-        # 检查链的长度是否为 2 * max_fork，因为每个区块包含 (Block, Transaction)
+        # Ensure the chain has a valid length
         if len(chain) != self.max_fork * 2:
             return False
 
-        # 检查链的区块和交易类型是否匹配
         valid_parts = sum(
             isinstance(block, self.Block) and isinstance(transaction, self.Transaction)
             for block, transaction in zip(chain[::2], chain[1::2])
@@ -87,14 +74,13 @@ class EthereumPoSModel(BlockchainModel):
         if valid_parts < self.max_fork:
             return False
 
-        # 确保链中所有 Block.NoBlock 后面的区块都是 Block.NoBlock
+        # Check continuity and transaction rules
         last_block = max([0] + [idx for idx, block in enumerate(chain[::2]) if block is self.Block.Exists])
         first_no_block = min(
             [self.max_fork - 1] + [idx for idx, block in enumerate(chain[::2]) if block is self.Block.NoBlock])
         if last_block > first_no_block:
             return False
 
-        # 检查没有交易存在于 Block.NoBlock 中
         invalid_transactions = sum(
             block is self.Block.NoBlock and transaction is self.Transaction.With
             for block, transaction in zip(chain[::2], chain[1::2])
@@ -105,27 +91,12 @@ class EthereumPoSModel(BlockchainModel):
         return True
 
     def is_state_valid(self, state: BlockchainModel.State) -> bool:
-        """
-        检查状态是否合法，包括链的结构、长度和交易数量是否符合要求。
-        :param state: 当前状态
-        :return: 状态是否合法（True 或 False）
-        """
-        # 解析状态
         a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
-
-        # 检查链的有效性
-        if not self.is_chain_valid(a) or not self.is_chain_valid(h):
-            return False
-
-        # 检查链长度是否与状态中的长度一致
-        if length_a != self.chain_length(a) or length_h != self.chain_length(h):
-            return False
-
-        # 检查交易数量是否不超过交易池大小
-        if transactions_a > pool or transactions_h > pool:
-            return False
-
-        return True
+        return self.is_chain_valid(a) and self.is_chain_valid(h) \
+            and length_a == self.chain_length(a) \
+            and length_h == self.chain_length(h) \
+            and transactions_a == self.chain_transactions(a) <= pool \
+            and transactions_h == self.chain_transactions(h) <= pool
 
     @staticmethod
     def truncate_chain(chain: tuple, truncate_to: int) -> tuple:
@@ -163,32 +134,45 @@ class EthereumPoSModel(BlockchainModel):
             transitions.add(self.final_state, probability=1, reward=self.error_penalty)
             return transitions
 
+        elif state == self.final_state:
+            transitions.add(self.final_state, probability=1)
+            return transitions
+
         a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
 
-        # 使用 chain_length() 获取链的长度
-        length_a = self.chain_length(a)
-        length_h = self.chain_length(h)
+        if action is self.Action.Illegal:
+            print("Current action is Illegal")
+            transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
 
         if action == self.Action.Withhold:
-            # 构造完整的状态 `tuple`
-            attacker_block = (a + ((self.Block.Exists, self.Transaction.NoTransaction),), h,
-                              self.Fork.Irrelevant, pool, length_a + 1, length_h, transactions_a, transactions_h)
+            print("Current action is Withhold")
+            # Add a block to the attacker's chain
+            new_a = a + ((self.Block.Exists, self.Transaction.NoTransaction),)
+            new_a = self.truncate_chain(new_a, self.max_fork)  # Ensure the length of chain `a` is valid
+            attacker_block = (
+                new_a, h, self.Fork.Irrelevant, pool, len(new_a) // 2, length_h, transactions_a, transactions_h)
             transitions.add(attacker_block, probability=self.alpha)
 
-            honest_block = (a, h + ((self.Block.Exists, self.Transaction.NoTransaction),),
-                            self.Fork.Relevant, pool, length_a, length_h + 1, transactions_a, transactions_h)
+            # Add a block to the honest chain
+            new_h = h + ((self.Block.Exists, self.Transaction.NoTransaction),)
+            new_h = self.truncate_chain(new_h, self.max_fork)  # Ensure the length of chain `h` is valid
+            honest_block = (
+                a, new_h, self.Fork.Relevant, pool, length_a, len(new_h) // 2, transactions_a, transactions_h)
             transitions.add(honest_block, probability=1 - self.alpha)
 
         elif action == self.Action.Release:
+            print("Current action is Release")
             if length_a > length_h:
-                # 使用 chain_length() 获取长度并更新状态
-                next_state = (a[:length_a - length_h - 1], self.create_empty_chain(),
-                              self.Fork.Irrelevant, pool, length_a - (length_h + 1), 0, transactions_a, transactions_h)
+                # Adjust chain lengths using truncate_chain
+                new_a = self.truncate_chain(a, length_h + 1)
+                next_state = (new_a, self.create_empty_chain(), self.Fork.Irrelevant, pool,
+                              len(new_a) // 2, 0, transactions_a, transactions_h)
                 transitions.add(next_state, probability=1, reward=length_h + 1)
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
         elif action == self.Action.Equivocate:
+            print("Current action is Equivocate")
             if fork == self.Fork.Relevant:
                 next_state = (a, h, self.Fork.Active, pool, length_a, length_h, transactions_a, transactions_h)
                 transitions.add(next_state, probability=1)
@@ -196,15 +180,84 @@ class EthereumPoSModel(BlockchainModel):
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
         elif action == self.Action.Vote:
-            attacker_block = (a + ((self.Block.Exists, self.Transaction.NoTransaction),), h,
-                              self.Fork.Irrelevant, pool, length_a + 1, length_h, transactions_a, transactions_h)
+            print("Current action is Vote")
+            # Add a block to the attacker's chain
+            new_a = a + ((self.Block.Exists, self.Transaction.NoTransaction),)
+            new_a = self.truncate_chain(new_a, self.max_fork)
+            attacker_block = (
+                new_a, h, self.Fork.Irrelevant, pool, len(new_a) // 2, length_h, transactions_a, transactions_h)
             transitions.add(attacker_block, probability=self.alpha)
 
-            honest_block = (a, h + ((self.Block.Exists, self.Transaction.NoTransaction),),
-                            self.Fork.Relevant, pool, length_a, length_h + 1, transactions_a, transactions_h)
+            # Add a block to the honest chain
+            new_h = h + ((self.Block.Exists, self.Transaction.NoTransaction),)
+            new_h = self.truncate_chain(new_h, self.max_fork)
+            honest_block = (
+                a, new_h, self.Fork.Relevant, pool, length_a, len(new_h) // 2, transactions_a, transactions_h)
             transitions.add(honest_block, probability=1 - self.alpha)
 
         return transitions
 
     def get_honest_revenue(self) -> float:
         return self.alpha * (1 + self.transaction_chance)
+
+
+def main():
+    # 创建模型实例
+    # model = EthereumPoSModel(
+    #     alpha=0.3,  # 恶意验证者比例
+    #     gamma=0.5,  # 区块传播延迟概率
+    #     max_fork=5,  # 最大分叉数
+    #     transaction_chance=0.2,  # 交易出现的概率
+    #     max_pool=10  # 交易池最大大小
+    # )
+
+    model = BitcoinFeeModel(
+        alpha=0.3,  # 恶意验证者比例
+        gamma=0.5,  # 区块传播延迟概率
+        fee=0.2,
+        max_fork=5,  # 最大分叉数
+        transaction_chance=0.2,  # 交易出现的概率
+        max_pool=10  # 交易池最大大小
+    )
+
+    print("Model created:", model)
+
+    # 测试 get_initial_state 和 dissect_state
+    initial_state = model.get_initial_state()
+    print("\nInitial state:", initial_state)
+    dissected = model.dissect_state(initial_state)
+    print("Dissected initial state:", dissected)
+    print("Dissected components types:", [type(comp) for comp in dissected])
+
+    # 测试 get_final_state
+    final_state = model.get_final_state()
+    print("\nFinal state:", final_state)
+
+    # 测试链的相关方法
+    empty_chain = model.create_empty_chain()
+    print("\nEmpty chain:", empty_chain)
+    print("Empty chain is valid:", model.is_chain_valid(empty_chain))
+
+    # 测试链的长度计算和交易统计
+    chain_with_block = model.add_block(empty_chain, add_transaction=True)
+    print("\nChain with one block added:", chain_with_block)
+    print("Chain length:", model.chain_length(chain_with_block))
+    print("Chain transactions:", model.chain_transactions(chain_with_block))
+    print("Chain is valid:", model.is_chain_valid(chain_with_block))
+
+    # 测试状态的合法性检查
+    valid_state = initial_state[:2 * model.max_fork] + chain_with_block[2 * model.max_fork:]  # 构造有效状态
+    print("\nValid state created:", valid_state)
+    print("State is valid:", model.is_state_valid(valid_state))
+
+    # 测试 get_state_transitions
+    transitions = model.get_state_transitions(valid_state, model.Action.Adopt)
+    print("\nState transitions (Adopt action):")
+
+    # 打印 action 和 fork 的枚举值
+    print("\nAvailable Actions:", list(model.Action))
+    print("Fork States:", list(model.Fork))
+
+
+if __name__ == "__main__":
+    main()
