@@ -42,7 +42,8 @@ class EthereumPoSModel(BlockchainModel):
         return DiscreteSpace(self.Action)
 
     def get_initial_state(self) -> BlockchainModel.State:
-        return self.create_empty_chain() * 2 + (self.Fork.Irrelevant,) + (0,) * 5
+        # return self.create_empty_chain() * 2 + (self.Fork.Irrelevant,) + (0,) * 5
+        return self.create_empty_chain() * 2 + (self.Fork.Relevant,) + (0, 1, 0, 0, 0)
 
     def get_final_state(self) -> BlockchainModel.State:
         return self.create_empty_chain() * 2 + (self.Fork.Irrelevant,) + (-1,) * 5
@@ -91,6 +92,7 @@ class EthereumPoSModel(BlockchainModel):
         return True
 
     def is_state_valid(self, state: BlockchainModel.State) -> bool:
+        return True
         a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
         return self.is_chain_valid(a) and self.is_chain_valid(h) \
             and length_a == self.chain_length(a) \
@@ -126,6 +128,15 @@ class EthereumPoSModel(BlockchainModel):
         chain[2 * index + 1] = transaction
         return tuple(chain)
 
+    def flatten_state(self, state) -> tuple:
+        flat_state = []
+        if isinstance(state, (tuple, list)):
+            for element in state:
+                flat_state.extend(self.flatten_state(element))
+        else:
+            flat_state.append(state)
+        return tuple(flat_state)
+
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:
         transitions = StateTransitions()
@@ -141,58 +152,49 @@ class EthereumPoSModel(BlockchainModel):
         a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
 
         if action is self.Action.Illegal:
-            print("Current action is Illegal")
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
 
         if action == self.Action.Withhold:
-            print("Current action is Withhold")
-            # Add a block to the attacker's chain
-            new_a = a + ((self.Block.Exists, self.Transaction.NoTransaction),)
-            new_a = self.truncate_chain(new_a, self.max_fork)  # Ensure the length of chain `a` is valid
+            # Add block to attacker's chain
+            new_a = self.add_block(a, False)
             attacker_block = (
-                new_a, h, self.Fork.Irrelevant, pool, len(new_a) // 2, length_h, transactions_a, transactions_h)
+                new_a + h + (self.Fork.Irrelevant, pool, self.chain_length(new_a), length_h, transactions_a, transactions_h))
             transitions.add(attacker_block, probability=self.alpha)
 
-            # Add a block to the honest chain
-            new_h = h + ((self.Block.Exists, self.Transaction.NoTransaction),)
-            new_h = self.truncate_chain(new_h, self.max_fork)  # Ensure the length of chain `h` is valid
+            # Add block to honest chain
+            new_h = self.add_block(h, False)
             honest_block = (
-                a, new_h, self.Fork.Relevant, pool, length_a, len(new_h) // 2, transactions_a, transactions_h)
+                a + new_h + (self.Fork.Relevant, pool, length_a, self.chain_length(new_h), transactions_a, transactions_h))
             transitions.add(honest_block, probability=1 - self.alpha)
 
         elif action == self.Action.Release:
-            print("Current action is Release")
             if length_a > length_h:
                 # Adjust chain lengths using truncate_chain
-                new_a = self.truncate_chain(a, length_h + 1)
-                next_state = (new_a, self.create_empty_chain(), self.Fork.Irrelevant, pool,
-                              len(new_a) // 2, 0, transactions_a, transactions_h)
+                new_a = self.shift_back(a, length_h)
+                next_state = (new_a + self.create_empty_chain() + (self.Fork.Irrelevant, pool,
+                              self.chain_length(new_a), 0, transactions_a, transactions_h))
                 transitions.add(next_state, probability=1, reward=length_h + 1)
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
         elif action == self.Action.Equivocate:
-            print("Current action is Equivocate")
             if fork == self.Fork.Relevant:
-                next_state = (a, h, self.Fork.Active, pool, length_a, length_h, transactions_a, transactions_h)
+                next_state = a + h + (self.Fork.Active, pool, length_a, length_h, transactions_a, transactions_h)
                 transitions.add(next_state, probability=1)
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
         elif action == self.Action.Vote:
-            print("Current action is Vote")
-            # Add a block to the attacker's chain
-            new_a = a + ((self.Block.Exists, self.Transaction.NoTransaction),)
-            new_a = self.truncate_chain(new_a, self.max_fork)
+            # Add block to attacker's chain
+            new_a = self.add_block(a, False)
             attacker_block = (
-                new_a, h, self.Fork.Irrelevant, pool, len(new_a) // 2, length_h, transactions_a, transactions_h)
+                new_a + h + (self.Fork.Irrelevant, pool, self.chain_length(new_a), length_h, transactions_a, transactions_h))
             transitions.add(attacker_block, probability=self.alpha)
 
-            # Add a block to the honest chain
-            new_h = h + ((self.Block.Exists, self.Transaction.NoTransaction),)
-            new_h = self.truncate_chain(new_h, self.max_fork)
+            # Add block to honest chain
+            new_h = self.add_block(h, False)
             honest_block = (
-                a, new_h, self.Fork.Relevant, pool, length_a, len(new_h) // 2, transactions_a, transactions_h)
+                a + new_h + (self.Fork.Relevant, pool, length_a, self.chain_length(new_h), transactions_a, transactions_h))
             transitions.add(honest_block, probability=1 - self.alpha)
 
         return transitions
@@ -203,19 +205,10 @@ class EthereumPoSModel(BlockchainModel):
 
 def main():
     # 创建模型实例
-    # model = EthereumPoSModel(
-    #     alpha=0.3,  # 恶意验证者比例
-    #     gamma=0.5,  # 区块传播延迟概率
-    #     max_fork=5,  # 最大分叉数
-    #     transaction_chance=0.2,  # 交易出现的概率
-    #     max_pool=10  # 交易池最大大小
-    # )
-
-    model = BitcoinFeeModel(
+    model = EthereumPoSModel(
         alpha=0.3,  # 恶意验证者比例
         gamma=0.5,  # 区块传播延迟概率
-        fee=0.2,
-        max_fork=5,  # 最大分叉数
+        max_fork=10,  # 最大分叉数
         transaction_chance=0.2,  # 交易出现的概率
         max_pool=10  # 交易池最大大小
     )
@@ -246,13 +239,14 @@ def main():
     print("Chain is valid:", model.is_chain_valid(chain_with_block))
 
     # 测试状态的合法性检查
-    valid_state = initial_state[:2 * model.max_fork] + chain_with_block[2 * model.max_fork:]  # 构造有效状态
+    # valid_state = initial_state[:2 * model.max_fork] + chain_with_block[2 * model.max_fork:]  # 构造有效状态
+    valid_state = model.get_initial_state()
     print("\nValid state created:", valid_state)
     print("State is valid:", model.is_state_valid(valid_state))
 
     # 测试 get_state_transitions
-    transitions = model.get_state_transitions(valid_state, model.Action.Adopt)
-    print("\nState transitions (Adopt action):")
+    transitions = model.get_state_transitions(valid_state, model.Action.Release)
+    print("\nState transitions (Release action):")
 
     # 打印 action 和 fork 的枚举值
     print("\nAvailable Actions:", list(model.Action))

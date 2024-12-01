@@ -129,6 +129,8 @@ class BitcoinFeeModel(BlockchainModel):
                               check_valid: bool = True) -> StateTransitions:
         transitions = StateTransitions()
 
+        print("Getting state transitions for BitcoinFeeModel")
+
         if check_valid and not self.is_state_valid(state):
             transitions.add(self.final_state, probability=1, reward=self.error_penalty)
             return transitions
@@ -144,12 +146,14 @@ class BitcoinFeeModel(BlockchainModel):
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
 
         if action_type is self.Action.Adopt:
+            print("Current action is adopt")
             if 0 < action_param <= length_h:
                 accepted_transactions = self.chain_transactions(self.truncate_chain(h, action_param))
                 next_state = self.create_empty_chain() + self.shift_back(h, action_param) \
                              + (self.Fork.Irrelevant, pool - accepted_transactions,
                                 0, length_h - action_param,
                                 0, transactions_h - accepted_transactions)
+                print("State length of adopt action is: ", len(next_state))
                 transitions.add(next_state, probability=1, difficulty_contribution=action_param)
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
@@ -161,12 +165,14 @@ class BitcoinFeeModel(BlockchainModel):
                              + (self.Fork.Irrelevant, pool - accepted_transactions,
                                 length_a - action_param, 0,
                                 transactions_a - accepted_transactions, 0)
+                print("State length of reveal action is: ", len(next_state))
                 reward = (action_param + accepted_transactions * self.fee) * self.block_reward
                 transitions.add(next_state, probability=1, reward=reward, difficulty_contribution=action_param)
 
             elif 0 < length_h == action_param <= length_a < self.max_fork \
                     and fork is self.Fork.Relevant:
                 next_state = a + h + (self.Fork.Active, pool, length_a, length_h, transactions_a, transactions_h)
+                print("State length of reveal action is: ", len(next_state))
                 transitions.add(next_state, probability=1)
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
@@ -182,6 +188,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                     + (self.Fork.Irrelevant, pool,
                                                        length_a + 1, length_h,
                                                        transactions_a + int(add_transaction), transactions_h)
+                print("State length of mine action is: ", len(attacker_block_no_new_transaction))
                 transitions.add(attacker_block_no_new_transaction,
                                 probability=self.alpha * (1 - new_transaction_chance))
 
@@ -189,6 +196,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                  + (self.Fork.Irrelevant, min(self.max_pool, pool + 1),
                                                     length_a + 1, length_h,
                                                     transactions_a + int(add_transaction), transactions_h)
+                print("State length of mine action is: ", len(attacker_block_new_transaction))
                 transitions.add(attacker_block_new_transaction, probability=self.alpha * new_transaction_chance,
                                 allow_merging=True)
 
@@ -199,6 +207,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                   + (self.Fork.Relevant, pool,
                                                      length_a, length_h + 1,
                                                      transactions_a, transactions_h + int(add_transaction))
+                print("State length of mine action is: ", len(honest_block_no_new_transaction))
                 transitions.add(honest_block_no_new_transaction,
                                 probability=(1 - self.alpha) * (1 - new_transaction_chance))
 
@@ -206,6 +215,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                + (self.Fork.Relevant, min(self.max_pool, pool + 1),
                                                   length_a, length_h + 1,
                                                   transactions_a, transactions_h + int(add_transaction))
+                print("State length of mine action is: ", len(honest_block_new_transaction))
                 transitions.add(honest_block_new_transaction, probability=(1 - self.alpha) * new_transaction_chance,
                                 allow_merging=True)
 
@@ -216,6 +226,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                     + (self.Fork.Active, pool,
                                                        length_a + 1, length_h,
                                                        transactions_a + int(add_transaction), transactions_h)
+                print("State length of mine action is: ", len(attacker_block_no_new_transaction))
                 transitions.add(attacker_block_no_new_transaction,
                                 probability=self.alpha * (1 - self.transaction_chance))
 
@@ -223,6 +234,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                  + (self.Fork.Active, min(self.max_pool, pool + 1),
                                                     length_a + 1, length_h,
                                                     transactions_a + int(add_transaction), transactions_h)
+                print("State length of mine action is: ", len(attacker_block_new_transaction))
                 transitions.add(attacker_block_new_transaction, probability=self.alpha * self.transaction_chance,
                                 allow_merging=True)
 
@@ -238,6 +250,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                              length_a - accepted_blocks, 1,
                                                              transactions_a - accepted_transactions,
                                                              int(add_transaction))
+                print("State length of mine action is: ", len(honest_support_block_no_new_transaction))
                 transitions.add(honest_support_block_no_new_transaction,
                                 probability=self.gamma * (1 - self.alpha) * (1 - new_transaction_chance),
                                 reward=reward, difficulty_contribution=accepted_blocks)
@@ -249,6 +262,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                           length_a - accepted_blocks, 1,
                                                           transactions_a - accepted_transactions,
                                                           int(add_transaction))
+                print("State length of mine action is: ", len(honest_support_block_new_transaction))
                 transitions.add(honest_support_block_new_transaction,
                                 probability=self.gamma * (1 - self.alpha) * new_transaction_chance,
                                 reward=reward, difficulty_contribution=accepted_blocks, allow_merging=True)
@@ -258,6 +272,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                             + (self.Fork.Relevant, pool,
                                                                length_a, length_h + 1,
                                                                transactions_a, transactions_h + int(add_transaction))
+                print("State length of mine action is: ", len(honest_adversary_block_no_new_transaction))
                 transitions.add(honest_adversary_block_no_new_transaction,
                                 probability=(1 - self.gamma) * (1 - self.alpha) * (1 - new_transaction_chance),
                                 allow_merging=True)
@@ -266,6 +281,7 @@ class BitcoinFeeModel(BlockchainModel):
                                                          + (self.Fork.Relevant, min(self.max_pool, pool + 1),
                                                             length_a, length_h + 1,
                                                             transactions_a, transactions_h + int(add_transaction))
+                print("State length of mine action is: ", len(honest_adversary_block_new_transaction))
                 transitions.add(honest_adversary_block_new_transaction,
                                 probability=(1 - self.gamma) * (1 - self.alpha) * new_transaction_chance,
                                 allow_merging=True)
