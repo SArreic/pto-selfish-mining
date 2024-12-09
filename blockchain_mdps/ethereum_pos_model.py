@@ -1,7 +1,6 @@
 from typing import Tuple
 from enum import Enum
 
-from blockchain_mdps import BitcoinFeeModel
 from blockchain_mdps.base.base_space.default_value_space import DefaultValueSpace
 from blockchain_mdps.base.base_space.discrete_space import DiscreteSpace
 from blockchain_mdps.base.base_space.multi_dimensional_discrete_space import MultiDimensionalDiscreteSpace
@@ -42,8 +41,7 @@ class EthereumPoSModel(BlockchainModel):
         return DiscreteSpace(self.Action)
 
     def get_initial_state(self) -> BlockchainModel.State:
-        # return self.create_empty_chain() * 2 + (self.Fork.Irrelevant,) + (0,) * 5
-        return self.create_empty_chain() * 2 + (self.Fork.Relevant,) + (0, 1, 0, 0, 0)
+        return self.create_empty_chain() * 2 + (self.Fork.Irrelevant,) + (0,) * 5
 
     def get_final_state(self) -> BlockchainModel.State:
         return self.create_empty_chain() * 2 + (self.Fork.Irrelevant,) + (-1,) * 5
@@ -92,7 +90,6 @@ class EthereumPoSModel(BlockchainModel):
         return True
 
     def is_state_valid(self, state: BlockchainModel.State) -> bool:
-        return True
         a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
         return self.is_chain_valid(a) and self.is_chain_valid(h) \
             and length_a == self.chain_length(a) \
@@ -108,12 +105,6 @@ class EthereumPoSModel(BlockchainModel):
         return chain[2 * shift_by:] + (self.Block.NoBlock, self.Transaction.NoTransaction) * shift_by
 
     def chain_length(self, chain: tuple) -> int:
-        """
-        计算链的长度，即包含 Block.Exists 的区块数量。
-        :param chain: 当前链，表示为 (Block, Transaction) 的元组列表
-        :return: 链的长度（包含 Block.Exists 的区块数量）
-        """
-        # 使用列表推导来统计链中 Block.Exists 的数量
         return len([block for block in chain[::2] if block is self.Block.Exists])
 
     def chain_transactions(self, chain: tuple) -> int:
@@ -142,7 +133,7 @@ class EthereumPoSModel(BlockchainModel):
         transitions = StateTransitions()
 
         if check_valid and not self.is_state_valid(state):
-            transitions.add(self.final_state, probability=1, reward=self.error_penalty)
+            transitions.add(self.final_state, probability=1)
             return transitions
 
         elif state == self.final_state:
@@ -155,47 +146,70 @@ class EthereumPoSModel(BlockchainModel):
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
 
         if action == self.Action.Withhold:
-            # Add block to attacker's chain
-            new_a = self.add_block(a, False)
-            attacker_block = (
-                new_a + h + (self.Fork.Irrelevant, pool, self.chain_length(new_a), length_h, transactions_a, transactions_h))
-            transitions.add(attacker_block, probability=self.alpha)
+            if length_a < self.max_fork and length_h < self.max_fork:
+                # Add block to attacker's chain
+                new_a = self.add_block(a, False)
+                attacker_block = (
+                        new_a + h + (
+                    self.Fork.Irrelevant, pool, self.chain_length(new_a), length_h, transactions_a, transactions_h))
+                transitions.add(attacker_block, probability=self.alpha)
 
-            # Add block to honest chain
-            new_h = self.add_block(h, False)
-            honest_block = (
-                a + new_h + (self.Fork.Relevant, pool, length_a, self.chain_length(new_h), transactions_a, transactions_h))
-            transitions.add(honest_block, probability=1 - self.alpha)
+                # Add block to honest chain
+                new_h = self.add_block(h, False)
+                honest_block = (
+                        a + new_h + (
+                    self.Fork.Relevant, pool, length_a, self.chain_length(new_h), transactions_a, transactions_h))
+                transitions.add(honest_block, probability=1 - self.alpha)
+            else:
+                transitions.add(self.final_state, probability=1)
 
         elif action == self.Action.Release:
             if length_a > length_h:
                 # Adjust chain lengths using truncate_chain
                 new_a = self.shift_back(a, length_h)
                 next_state = (new_a + self.create_empty_chain() + (self.Fork.Irrelevant, pool,
-                              self.chain_length(new_a), 0, transactions_a, transactions_h))
+                                                                   self.chain_length(new_a), 0, transactions_a,
+                                                                   transactions_h))
                 transitions.add(next_state, probability=1, reward=length_h + 1)
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
         elif action == self.Action.Equivocate:
-            if fork == self.Fork.Relevant:
-                next_state = a + h + (self.Fork.Active, pool, length_a, length_h, transactions_a, transactions_h)
-                transitions.add(next_state, probability=1)
+            if fork == self.Fork.Relevant and length_a < self.max_fork and length_h < self.max_fork:
+                fork_1 = self.add_block(h, False)
+                fork_2 = self.add_block(a, False)
+                next_state_1 = a + fork_1 + (
+                    self.Fork.Relevant, pool, length_a, self.chain_length(fork_1), transactions_a, transactions_h)
+                next_state_2 = fork_2 + h + (
+                    self.Fork.Relevant, pool, self.chain_length(fork_2), length_h, transactions_a, transactions_h)
+
+                transitions.add(next_state_1, probability=0.5)
+                transitions.add(next_state_2, probability=0.5)
+
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 
         elif action == self.Action.Vote:
-            # Add block to attacker's chain
-            new_a = self.add_block(a, False)
-            attacker_block = (
-                new_a + h + (self.Fork.Irrelevant, pool, self.chain_length(new_a), length_h, transactions_a, transactions_h))
-            transitions.add(attacker_block, probability=self.alpha)
+            if length_a < self.max_fork and length_h < self.max_fork:
+                # Add block to attacker's chain
+                add_transaction = transactions_a < pool
+                new_a = self.add_block(a, add_transaction)
+                attacker_block = (
+                        new_a + h + (self.Fork.Irrelevant, pool - int(add_transaction), self.chain_length(new_a),
+                                     length_h, transactions_a + int(add_transaction), transactions_h)
+                )
+                transitions.add(attacker_block, probability=self.alpha)
 
-            # Add block to honest chain
-            new_h = self.add_block(h, False)
-            honest_block = (
-                a + new_h + (self.Fork.Relevant, pool, length_a, self.chain_length(new_h), transactions_a, transactions_h))
-            transitions.add(honest_block, probability=1 - self.alpha)
+                # Add block to honest chain
+                add_transaction = transactions_h < pool
+                new_h = self.add_block(h, add_transaction)
+                honest_block = (
+                        a + new_h + (self.Fork.Relevant, pool - int(add_transaction), length_a,
+                                     self.chain_length(new_h), transactions_a, transactions_h + int(add_transaction))
+                )
+                transitions.add(honest_block, probability=1 - self.alpha)
+            else:
+                transitions.add(self.final_state, probability=1)
 
         return transitions
 
@@ -204,13 +218,12 @@ class EthereumPoSModel(BlockchainModel):
 
 
 def main():
-    # 创建模型实例
     model = EthereumPoSModel(
-        alpha=0.3,  # 恶意验证者比例
-        gamma=0.5,  # 区块传播延迟概率
-        max_fork=10,  # 最大分叉数
-        transaction_chance=0.2,  # 交易出现的概率
-        max_pool=10  # 交易池最大大小
+        alpha=0.3,
+        gamma=0.5,
+        max_fork=10,
+        transaction_chance=0.2,
+        max_pool=10
     )
 
     print("Model created:", model)
