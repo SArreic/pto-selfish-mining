@@ -83,6 +83,13 @@ class MDPBlockchainSimulator:
         reward = transition_values.rewards[next_state]
         difficulty_contribution = transition_values.difficulty_contributions[next_state]
         is_done = next_state == self.final_state
+        # print("Final state is: ", self.final_state)
+        # print("Current state is: ", self._current_state)
+        # print("Next state is: ", next_state)
+        if is_done:
+            print("Current State is: ", self._current_state)
+            print("Action is: ", self.action_index_to_action(action))
+            # print("Next State is Final State!")
 
         legal_actions = self.get_state_legal_actions_tensor(next_state)
 

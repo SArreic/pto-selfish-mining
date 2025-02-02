@@ -75,9 +75,13 @@ class EthereumUserModel(BlockchainModel):
 
         # 动作：多重签名投票（平衡攻击）
         elif action == self.Action.Equivocate:
-            if fork == self.Fork.Relevant:
-                next_state = a, h, self.Fork.Active
-                transitions.add(next_state, probability=1)
+            if fork == self.Fork.Relevant and a + h > 0:
+                success_probability = a / (a + h)
+                next_state = a, 0, self.Fork.Active
+                transitions.add(next_state, probability=success_probability, reward=0)
+
+                next_state = 0, h, self.Fork.Active
+                transitions.add(next_state, probability=1-success_probability, reward=0)
             else:
                 transitions.add(self.final_state, probability=1, reward=self.error_penalty)
 

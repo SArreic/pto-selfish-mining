@@ -168,26 +168,24 @@ class EthereumPoSModel(BlockchainModel):
             transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
 
         if action == self.Action.Withhold:
-            if length_h >= length_a or length_h == self.max_fork:
-                a = self.create_empty_chain()
-                h = self.create_empty_chain()
-                length_a = length_h = 0
-                new_state = (a + h + (self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h))
+            if length_h >= length_a or length_h == self.max_fork or length_a == self.max_fork:
+                new_state = (self.create_empty_chain() + self.create_empty_chain() +
+                             (self.Fork.Relevant, pool, 0, 0, 0, 0))
                 transitions.add(new_state, probability=1, reward=0)
             elif length_a < self.max_fork and length_h < self.max_fork:
                 add_transaction = transactions_a < pool
                 # Add block to attacker's chain
-                # new_a = self.add_block(a, add_transaction)
-                new_a = a
+                new_a = self.add_block(a, add_transaction)
+                # new_a = a
                 attacker_block = (
-                        new_a + h + (self.Fork.Irrelevant, pool, self.chain_length(new_a), length_h,
+                        new_a + h + (self.Fork.Relevant, pool, self.chain_length(new_a), length_h,
                                      transactions_a + int(add_transaction), transactions_h))
                 transitions.add(attacker_block, probability=self.alpha)
 
                 add_transaction = transactions_h < pool
                 # Add block to honest chain
-                # new_h = self.add_block(h, add_transaction)
-                new_h = h
+                new_h = self.add_block(h, add_transaction)
+                # new_h = h
                 honest_block = (
                         a + new_h + (self.Fork.Relevant, pool, length_a, self.chain_length(new_h),
                                      transactions_a, transactions_h + int(add_transaction)))
@@ -219,23 +217,21 @@ class EthereumPoSModel(BlockchainModel):
                 transitions.add(next_state, probability=1, reward=reward)
 
         elif action == self.Action.Equivocate:
-            if fork == self.Fork.Relevant and length_a < self.max_fork and length_h < self.max_fork:
-                add_transaction_a = transactions_a < pool
-                add_transaction_h = transactions_h < pool
-                fork_1 = self.add_block(h, add_transaction_h)
-                fork_2 = self.add_block(a, add_transaction_a)
-                next_state_1 = a + fork_1 + (
-                    self.Fork.Relevant, pool, length_a, self.chain_length(fork_1),
-                    transactions_a, transactions_h + int(add_transaction_h))
-                next_state_2 = fork_2 + h + (
-                    self.Fork.Relevant, pool, self.chain_length(fork_2), length_h,
-                    transactions_a + int(add_transaction_a), transactions_h)
+            if (fork == self.Fork.Relevant and length_a < self.max_fork and length_h < self.max_fork
+                    and length_a + length_h > 0):
+                success_probability = length_a / (length_a + length_h)
+                next_state_1 = a + self.create_empty_chain() + (
+                    self.Fork.Relevant, pool, length_a, 0,
+                    transactions_a, 0)
+                next_state_2 = self.create_empty_chain() + h + (
+                    self.Fork.Relevant, pool, 0, length_h,
+                    0, transactions_h)
 
-                transitions.add(next_state_1, probability=0.5)
-                transitions.add(next_state_2, probability=0.5)
+                transitions.add(next_state_1, probability=success_probability, reward=0)
+                transitions.add(next_state_2, probability=1-success_probability, reward=0)
 
             else:
-                block = a + h + (self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
+                block = self.create_empty_chain() + self.create_empty_chain() + (self.Fork.Relevant, pool, 0, 0, 0, 0)
                 transitions.add(block, probability=1, reward=self.error_penalty)
 
         elif action == self.Action.Vote:

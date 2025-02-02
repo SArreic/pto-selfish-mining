@@ -251,7 +251,7 @@ def run_mcts_fees(args: argparse.Namespace):
     print("The best policy is {}".format(_))
     # mdp = BitcoinFeeModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
     #                       max_pool=max_fork)
-    mdp = EthereumPoSModel(alpha=alpha, gamma=gamma, max_fork=max_fork, transaction_chance=transaction_chance,
+    mdp = EthereumPoSModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
                            max_pool=max_fork)
     # mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     smart_init = rev * (1 + fee * transaction_chance)
