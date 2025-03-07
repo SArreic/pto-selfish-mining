@@ -1,6 +1,7 @@
 import argparse
 import signal
 import sys
+import time
 from pathlib import Path
 from typing import Tuple, Any
 
@@ -236,6 +237,11 @@ def run_mcts(args: argparse.Namespace):
 
     # log_solution_info(mdp, rev, trainer)
 
+class RewardLogger:
+    def __call__(self, transition):
+        state, action, reward, next_state, done = transition
+        print(f"[Step Reward] Action={action} Reward={reward:.4f}")
+
 
 def run_mcts_fees(args: argparse.Namespace):
     alpha = args.alpha
@@ -268,9 +274,12 @@ def run_mcts_fees(args: argparse.Namespace):
                           train_episode_length=100, evaluate_episode_length=100, lr_decay_epoch=1000,
                           number_of_training_agents=args.train_agents, number_of_evaluation_agents=args.eval_agents,
                           lower_priority=args.no_bg, bind_all=args.bind_all, load_experiment=args.load_experiment,
-                          output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
+                          output_value_heatmap=False, normalize_target_values=True, use_cached_values=False,
+                          callbacks=[RewardLogger()])
 
     trainer.run()
+
+    log_solution_info(mdp, rev, trainer)
 
 
 if __name__ == '__main__':
@@ -293,5 +302,12 @@ if __name__ == '__main__':
     parser.add_argument('--seed', help='random seed', default=0, type=int)
     parser.add_argument('--lr', help='learning_rate', default=2e-4, type=float)
 
+    start_time = time.perf_counter()  # 更精确的计时器
+
     # solve_pt(parser.parse_args())
     run_mcts_fees(parser.parse_args())
+
+    end_time = time.perf_counter()
+
+    with open("time_record.txt", "w") as f:
+        f.write("Total time: " + str(end_time - start_time) + " seconds\n")  # 以秒为单位输出

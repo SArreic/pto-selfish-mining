@@ -1,3 +1,4 @@
+import logging
 from typing import Tuple
 from enum import Enum
 
@@ -147,31 +148,40 @@ class EthereumPoSModel(BlockchainModel):
             return transitions
 
         a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
+        reward = 0
 
         # if length_h == self.max_fork:
-            # print("Current State is: ", state)
-            # a = self.create_empty_chain()
-            # h = self.create_empty_chain()
-            # length_a = length_h = 0
-            # new_state = (a + h + (self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h))
-            # print("After state is: ", new_state)
-            # next_state = (self.create_empty_chain() + self.create_empty_chain() + (self.Fork.Relevant, pool,
-            #                                                                        0, 0, transactions_a,
-            #                                                                        transactions_h))
-            # transitions.add(next_state, probability=1, reward=0)
+        # print("Current State is: ", state)
+        # a = self.create_empty_chain()
+        # h = self.create_empty_chain()
+        # length_a = length_h = 0
+        # new_state = (a + h + (self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h))
+        # print("After state is: ", new_state)
+        # next_state = (self.create_empty_chain() + self.create_empty_chain() + (self.Fork.Relevant, pool,
+        #                                                                        0, 0, transactions_a,
+        #                                                                        transactions_h))
+        # transitions.add(next_state, probability=1, reward=0)
 
         # state before final state is 0, 0, 10, 0, 0
         # find ways to reduce honest chain length
         # so that it won't extend the maximum
 
         if action is self.Action.Illegal:
-            transitions.add(self.final_state, probability=1, reward=self.error_penalty / 2)
+            reward = self.error_penalty / 2
+            transitions.add(self.final_state, probability=1, reward=reward)
+
+            if reward != 0:
+                logging.basicConfig(level=logging.INFO)
+                logger = logging.getLogger(__name__)
+                logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
+                with open("reward_record.txt", "w") as f:
+                    f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
 
         if action == self.Action.Withhold:
             if length_h >= length_a or length_h == self.max_fork or length_a == self.max_fork:
                 new_state = (self.create_empty_chain() + self.create_empty_chain() +
                              (self.Fork.Relevant, pool, 0, 0, 0, 0))
-                transitions.add(new_state, probability=1, reward=0)
+                transitions.add(new_state, probability=1, reward=reward)
             elif length_a < self.max_fork and length_h < self.max_fork:
                 add_transaction = transactions_a < pool
                 # Add block to attacker's chain
@@ -192,6 +202,13 @@ class EthereumPoSModel(BlockchainModel):
                 transitions.add(honest_block, probability=1 - self.alpha)
             else:
                 transitions.add(self.final_state, probability=1)
+
+            if reward != 0:
+                logging.basicConfig(level=logging.INFO)
+                logger = logging.getLogger(__name__)
+                logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
+                with open("reward_recode.txt", "w") as f:
+                    f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
 
         elif action == self.Action.Release:
             if length_a >= length_h:
@@ -216,6 +233,13 @@ class EthereumPoSModel(BlockchainModel):
                                                                    transactions_h - accepted_transactions))
                 transitions.add(next_state, probability=1, reward=reward)
 
+                if reward != 0:
+                    logging.basicConfig(level=logging.INFO)
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
+                    with open("reward_recode.txt", "w") as f:
+                        f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
+
         elif action == self.Action.Equivocate:
             if (fork == self.Fork.Relevant and length_a < self.max_fork and length_h < self.max_fork
                     and length_a + length_h > 0):
@@ -227,12 +251,19 @@ class EthereumPoSModel(BlockchainModel):
                     self.Fork.Relevant, pool, 0, length_h,
                     0, transactions_h)
 
-                transitions.add(next_state_1, probability=success_probability, reward=0)
-                transitions.add(next_state_2, probability=1-success_probability, reward=0)
+                transitions.add(next_state_1, probability=success_probability, reward=reward)
+                transitions.add(next_state_2, probability=1 - success_probability, reward=reward)
 
             else:
                 block = self.create_empty_chain() + self.create_empty_chain() + (self.Fork.Relevant, pool, 0, 0, 0, 0)
                 transitions.add(block, probability=1, reward=self.error_penalty)
+
+            if reward != 0:
+                logging.basicConfig(level=logging.INFO)
+                logger = logging.getLogger(__name__)
+                logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
+                with open("reward_recode.txt", "w") as f:
+                    f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
 
         elif action == self.Action.Vote:
             if length_a < self.max_fork and length_h < self.max_fork:
@@ -256,6 +287,13 @@ class EthereumPoSModel(BlockchainModel):
             else:
                 block = a + h + (self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
                 transitions.add(block, probability=1)
+
+            if reward != 0:
+                logging.basicConfig(level=logging.INFO)
+                logger = logging.getLogger(__name__)
+                logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
+                with open("reward_recode.txt", "w") as f:
+                    f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
 
         return transitions
 
