@@ -24,6 +24,8 @@ reward_pattern = re.compile(r"'actions':\s*{([^}]+)}")
 # 统计数据容器
 action_rewards = {}
 timestamps = []
+cumulative_rewards = []
+cumulative_reward = 0  # 初始化累计奖励为0
 
 # 读取文件并解析
 with open(filename, "r", encoding="utf-16") as file:
@@ -33,8 +35,16 @@ with open(filename, "r", encoding="utf-16") as file:
             actions_str = match.group(1)
             actions = eval("{" + actions_str + "}")
 
-            timestamps.append(idx)
+            # 计算当前行所有动作奖励的总和
+            total_reward_in_step = sum(actions.values())
 
+            # 累计奖励
+            cumulative_reward += total_reward_in_step
+
+            timestamps.append(idx)
+            cumulative_rewards.append(cumulative_reward)
+
+            # 将数据存储到原本的动作奖励统计容器
             for action, reward in actions.items():
                 if action not in action_rewards:
                     action_rewards[action] = []
@@ -45,7 +55,6 @@ print(f"读取文件: {filename}\n")
 print(f"共发现{len(action_rewards)}种不同的动作类型。\n")
 
 action_stats = {}
-cumulative_rewards = {action: [] for action in action_rewards}
 
 for action, rewards in action_rewards.items():
     count = len(rewards)
@@ -54,12 +63,6 @@ for action, rewards in action_rewards.items():
     max_reward = max(rewards)
     median_reward = statistics.median(rewards)
     std_dev = statistics.stdev(rewards) if len(rewards) > 1 else 0.0
-
-    # 计算累计奖励
-    cum_sum = 0
-    for reward in rewards:
-        cum_sum += reward
-        cumulative_rewards[action].append(cum_sum)
 
     action_stats[action] = {
         "count": count,
@@ -121,13 +124,13 @@ maxs = [action_stats[a]["max"] for a in actions]
 
 ax.bar(x, means, width=bar_width, label='Mean', color='lightgreen')
 ax.bar([p + bar_width for p in x], medians, width=bar_width, label='Median', color='lightskyblue')
-ax.bar([p + 2*bar_width for p in x], mins, width=bar_width, label='Min', color='lightcoral')
-ax.bar([p + 3*bar_width for p in x], maxs, width=bar_width, label='Max', color='gold')
+ax.bar([p + 2 * bar_width for p in x], mins, width=bar_width, label='Min', color='lightcoral')
+ax.bar([p + 3 * bar_width for p in x], maxs, width=bar_width, label='Max', color='gold')
 
 ax.set_xlabel('Action')
 ax.set_ylabel('Reward Value')
 ax.set_title('Reward Statistics per Action')
-ax.set_xticks([p + 1.5*bar_width for p in x])
+ax.set_xticks([p + 1.5 * bar_width for p in x])
 ax.set_xticklabels(actions, rotation=45)
 ax.legend()
 plt.grid(axis='y', linestyle='--', alpha=0.7)
@@ -135,17 +138,33 @@ plt.tight_layout()
 plt.savefig(os.path.join(output_dir, "reward_stats.png"))
 plt.close()
 
-# 4. 累计奖励趋势图
+# 4. 每个动作奖励随时间变化的折线图
+for action, rewards in action_rewards.items():
+    plt.figure(figsize=(12, 6))
+    plt.plot(range(len(rewards)), rewards, label=action)
+    plt.xlabel("Time Step")
+    plt.ylabel("Reward")
+    plt.title(f"Reward Change for Action: {action}")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f"reward_change_{action}.png"))
+    plt.close()
+
+# 5. 累计奖励折线图
 plt.figure(figsize=(12, 6))
-for action, cum_rewards in cumulative_rewards.items():
-    plt.plot(timestamps[:len(cum_rewards)], cum_rewards, label=f"{action}")
-plt.xlabel("Step")
+plt.plot(range(len(cumulative_rewards)), cumulative_rewards, label="Cumulative Reward", color="purple")
+plt.xlabel("Time")
 plt.ylabel("Cumulative Reward")
 plt.title("Cumulative Reward Over Time")
 plt.legend()
+
+# 动态调整纵坐标上限
+max_cumulative_reward = max(cumulative_rewards)
+plt.ylim(0, max_cumulative_reward * 1.1)  # 设置纵坐标范围为累计奖励的最大值的1.1倍
 plt.grid(True)
 plt.tight_layout()
-plt.savefig(os.path.join(output_dir, "cumulative_reward.png"))
+plt.savefig(os.path.join(output_dir, "cumulative_reward_all_actions.png"))
 plt.close()
 
 # 生成PDF报告
@@ -163,9 +182,7 @@ caption_style = ParagraphStyle(
     alignment=1
 )
 
-content = []
-content.append(Paragraph("Reward Analysis Report", styles['Title']))
-content.append(Spacer(1, 12))
+content = [Paragraph("Reward Analysis Report", styles['Title']), Spacer(1, 12)]
 
 # 表格统计信息
 table_data = [["Action", "Count", "Avg", "Min", "Max", "Median", "StdDev"]]
@@ -183,16 +200,25 @@ table.setStyle(TableStyle([
 content.append(table)
 content.append(Spacer(1, 12))
 
+
 # 图表部分
 def add_image(caption, filename):
     content.append(Paragraph(caption, caption_style))
     content.append(Image(os.path.join(output_dir, filename), width=400, height=250))
     content.append(Spacer(1, 12))
 
+
+# 累计奖励折线图
+add_image("Figure: Cumulative Reward Over Time", "cumulative_reward_all_actions.png")
+
+# 原有的图表
 add_image("Figure 1: Action Occurrence Count", "action_count.png")
 add_image("Figure 2: Reward Distribution by Action", "reward_distribution.png")
 add_image("Figure 3: Reward Statistics per Action", "reward_stats.png")
-add_image("Figure 4: Cumulative Reward Over Time", "cumulative_reward.png")
+
+# 每个动作的奖励随时间变化的折线图
+for action in action_rewards:
+    add_image(f"Figure: Reward Change for Action - {action}", f"reward_change_{action}.png")
 
 doc.build(content)
 
