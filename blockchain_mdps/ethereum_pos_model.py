@@ -150,22 +150,6 @@ class EthereumPoSModel(BlockchainModel):
         a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
         reward = 0
 
-        # if length_h == self.max_fork:
-        # print("Current State is: ", state)
-        # a = self.create_empty_chain()
-        # h = self.create_empty_chain()
-        # length_a = length_h = 0
-        # new_state = (a + h + (self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h))
-        # print("After state is: ", new_state)
-        # next_state = (self.create_empty_chain() + self.create_empty_chain() + (self.Fork.Relevant, pool,
-        #                                                                        0, 0, transactions_a,
-        #                                                                        transactions_h))
-        # transitions.add(next_state, probability=1, reward=0)
-
-        # state before final state is 0, 0, 10, 0, 0
-        # find ways to reduce honest chain length
-        # so that it won't extend the maximum
-
         if action is self.Action.Illegal:
             reward = self.error_penalty / 2
             transitions.add(self.final_state, probability=1, reward=reward)
@@ -299,6 +283,71 @@ class EthereumPoSModel(BlockchainModel):
 
     def get_honest_revenue(self) -> float:
         return self.alpha * (1 + self.transaction_chance)
+
+    def get_possible_actions(self, state):
+        """
+        获取给定状态下的所有可能动作。
+        """
+        possible_actions = []
+
+        # 不允许在最终状态采取任何动作
+        if state == self.get_final_state():
+            return possible_actions
+
+        # 所有动作都是合法的，除了在某些特定条件下
+        for action in self.Action:
+            if action == self.Action.Illegal:
+                continue  # 非法动作不考虑
+
+            if action == self.Action.Withhold and state[-6] == self.Fork.Irrelevant:
+                continue  # 只有在相关分叉时才能隐瞒
+
+            if action == self.Action.Release and state[-6] == self.Fork.Irrelevant:
+                continue  # 只有在相关分叉时才能发布
+
+            possible_actions.append(action)
+
+        return possible_actions
+
+    def get_reward(self, state, action):
+        """
+        计算在给定状态下执行某个动作的即时奖励。
+        """
+        reward = 0
+
+        if state == self.get_final_state():
+            return reward  # 终止状态无奖励
+
+        a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
+
+        if action == self.Action.Withhold:
+            reward = 0  # 隐瞒不会立即获得奖励
+
+        elif action == self.Action.Release:
+            if length_a >= length_h:
+                accepted_blocks = length_h
+                accepted_transactions = self.chain_transactions(self.truncate_chain(a, accepted_blocks))
+                reward = (accepted_blocks + accepted_transactions * self.fee) * self.block_reward
+
+        elif action == self.Action.Equivocate:
+            reward = -1  # 可能的惩罚
+
+        elif action == self.Action.Vote:
+            reward = 0.1  # 轻微奖励
+
+        return reward
+
+    def tuple_to_torch(self, state):
+        import torch
+        import numpy as np
+
+        def convert_element(x):
+            if isinstance(x, Enum):
+                return x.value
+            return int(x)
+
+        flat = [convert_element(x) for x in self.flatten_state(state)]
+        return torch.tensor(flat, dtype=torch.float32)
 
 
 def main():

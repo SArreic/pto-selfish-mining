@@ -275,7 +275,8 @@ def run_mcts_fees(args: argparse.Namespace):
                           number_of_training_agents=args.train_agents, number_of_evaluation_agents=args.eval_agents,
                           lower_priority=args.no_bg, bind_all=args.bind_all, load_experiment=args.load_experiment,
                           output_value_heatmap=False, normalize_target_values=True, use_cached_values=False,
-                          callbacks=[RewardLogger()])
+                          callbacks=[RewardLogger()],
+                          algorithm_type=args.algorithm_type)
 
     trainer.run()
 
@@ -301,6 +302,7 @@ if __name__ == '__main__':
     parser.add_argument('--delta', help='chance for a transaction', default=0.01, type=float)
     parser.add_argument('--seed', help='random seed', default=0, type=int)
     parser.add_argument('--lr', help='learning_rate', default=2e-4, type=float)
+    parser.add_argument('--algorithm_type', help='algorithm', default='greedy', type=str)
 
     start_time = time.perf_counter()  # 更精确的计时器
 

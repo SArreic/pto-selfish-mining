@@ -31,7 +31,10 @@ class TensorboardLoggingCallback(LoggingCallback):
         self.orchestrator = orchestrator
 
         if num_of_q_values_in_approximator is None:
-            num_of_q_values_in_approximator = agent.simulator.num_of_actions
+            if hasattr(agent, "simulator") and hasattr(agent.simulator, "num_of_actions"):
+                num_of_q_values_in_approximator = agent.simulator.num_of_actions
+            else:
+                num_of_q_values_in_approximator = 0
         self.num_of_q_values_in_approximator = num_of_q_values_in_approximator
 
         # Must log something to create the event file

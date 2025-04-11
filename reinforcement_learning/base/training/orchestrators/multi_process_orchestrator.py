@@ -197,8 +197,9 @@ class MultiProcessOrchestrator(Orchestrator):
         self.approximator = self.create_detached_approximator()
         self.agent.approximator = self.create_detached_approximator()
 
-        if self.loss_fn.target_approximator is not None:
-            self.loss_fn.target_approximator = self.create_detached_approximator()
+        if self.loss_fn is not None and hasattr(self.loss_fn, "target_approximator"):
+            if self.loss_fn.target_approximator is not None:
+                self.loss_fn.target_approximator = self.create_detached_approximator()
 
     def create_detached_approximator(self) -> Approximator:
         approximator = self.algorithm.create_approximator()
