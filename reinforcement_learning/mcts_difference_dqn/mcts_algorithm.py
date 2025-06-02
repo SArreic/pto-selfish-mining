@@ -46,6 +46,7 @@ class MCTSAlgorithm(RLAlgorithm):
         nn_factor = self.creation_args.get('nn_factor', 1 / self.simulator.expected_horizon)
         prune_tree_rate = self.creation_args.get('prune_tree_rate', 250)
         root_dirichlet_noise = self.creation_args.get('root_dirichlet_noise', 0.5)
+        planning_strategy = self.creation_args.get('greedy')
         return MCTSAgent(
             self.create_approximator(),
             self.simulator,
@@ -65,7 +66,8 @@ class MCTSAlgorithm(RLAlgorithm):
             value_clip=value_clip,
             nn_factor=nn_factor,
             prune_tree_rate=prune_tree_rate,
-            root_dirichlet_noise=root_dirichlet_noise
+            root_dirichlet_noise=root_dirichlet_noise,
+            planning_strategy=planning_strategy
         )
 
     def create_loss_fn(self) -> MCTSLossFunction:

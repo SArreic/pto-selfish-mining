@@ -1,4 +1,6 @@
 import logging
+import math
+import random
 from typing import Tuple
 from enum import Enum
 
@@ -21,6 +23,7 @@ class EthereumPoSModel(BlockchainModel):
         # self.block_reward = 1 / (1 + self.transaction_chance * self.fee)
         # No need for normalization
         self.block_reward = 1
+        self.equivocate_count = 0  # 初始化为0
 
         self.Fork = self.create_int_enum('Fork', ['Irrelevant', 'Relevant', 'Active'])
         self.Action = self.create_int_enum('Action', ['Illegal', 'Withhold', 'Release', 'Equivocate', 'Vote'])
@@ -150,32 +153,9 @@ class EthereumPoSModel(BlockchainModel):
         a, h, fork, pool, length_a, length_h, transactions_a, transactions_h = self.dissect_state(state)
         reward = 0
 
-        # if length_h == self.max_fork:
-        # print("Current State is: ", state)
-        # a = self.create_empty_chain()
-        # h = self.create_empty_chain()
-        # length_a = length_h = 0
-        # new_state = (a + h + (self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h))
-        # print("After state is: ", new_state)
-        # next_state = (self.create_empty_chain() + self.create_empty_chain() + (self.Fork.Relevant, pool,
-        #                                                                        0, 0, transactions_a,
-        #                                                                        transactions_h))
-        # transitions.add(next_state, probability=1, reward=0)
-
-        # state before final state is 0, 0, 10, 0, 0
-        # find ways to reduce honest chain length
-        # so that it won't extend the maximum
-
         if action is self.Action.Illegal:
             reward = self.error_penalty / 2
             transitions.add(self.final_state, probability=1, reward=reward)
-
-            if reward != 0:
-                logging.basicConfig(level=logging.INFO)
-                logger = logging.getLogger(__name__)
-                logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
-                with open("reward_record.txt", "w") as f:
-                    f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
 
         if action == self.Action.Withhold:
             if length_h >= length_a or length_h == self.max_fork or length_a == self.max_fork:
@@ -203,13 +183,6 @@ class EthereumPoSModel(BlockchainModel):
             else:
                 transitions.add(self.final_state, probability=1)
 
-            if reward != 0:
-                logging.basicConfig(level=logging.INFO)
-                logger = logging.getLogger(__name__)
-                logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
-                with open("reward_recode.txt", "w") as f:
-                    f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
-
         elif action == self.Action.Release:
             if length_a >= length_h:
                 # Adjust chain lengths using truncate_chain
@@ -233,67 +206,94 @@ class EthereumPoSModel(BlockchainModel):
                                                                    transactions_h - accepted_transactions))
                 transitions.add(next_state, probability=1, reward=reward)
 
-                if reward != 0:
-                    logging.basicConfig(level=logging.INFO)
-                    logger = logging.getLogger(__name__)
-                    logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
-                    with open("reward_recode.txt", "w") as f:
-                        f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
-
         elif action == self.Action.Equivocate:
             if (fork == self.Fork.Relevant and length_a < self.max_fork and length_h < self.max_fork
                     and length_a + length_h > 0):
-                success_probability = length_a / (length_a + length_h)
-                next_state_1 = a + self.create_empty_chain() + (
-                    self.Fork.Relevant, pool, length_a, 0,
-                    transactions_a, 0)
-                next_state_2 = self.create_empty_chain() + h + (
-                    self.Fork.Relevant, pool, 0, length_h,
-                    0, transactions_h)
+                if random.random() < self.alpha:
+                    delayed_state = a + h + (
+                        self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
+                    transitions.add(delayed_state, probability=1, reward=self.error_penalty / 2e4)
+                else:
+                    success_probability = length_a / (length_a + length_h)
+                    next_state_1 = a + self.create_empty_chain() + (
+                        self.Fork.Relevant, pool, length_a, 0,
+                        transactions_a, 0)
+                    next_state_2 = self.create_empty_chain() + h + (
+                        self.Fork.Relevant, pool, 0, length_h,
+                        0, transactions_h)
 
-                transitions.add(next_state_1, probability=success_probability, reward=reward)
-                transitions.add(next_state_2, probability=1 - success_probability, reward=reward)
+                    transitions.add(next_state_1, probability=success_probability, reward=reward)
+                    transitions.add(next_state_2, probability=1 - success_probability, reward=reward)
 
             else:
                 block = self.create_empty_chain() + self.create_empty_chain() + (self.Fork.Relevant, pool, 0, 0, 0, 0)
                 transitions.add(block, probability=1, reward=self.error_penalty)
 
-            if reward != 0:
-                logging.basicConfig(level=logging.INFO)
-                logger = logging.getLogger(__name__)
-                logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
-                with open("reward_recode.txt", "w") as f:
-                    f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
-
         elif action == self.Action.Vote:
             if length_a < self.max_fork and length_h < self.max_fork:
-                # Add block to attacker's chain
-                add_transaction = transactions_a < pool
-                new_a = self.add_block(a, add_transaction)
-                attacker_block = (
-                        new_a + h + (self.Fork.Irrelevant, pool - int(add_transaction), self.chain_length(new_a),
-                                     length_h, transactions_a + int(add_transaction), transactions_h)
-                )
-                transitions.add(attacker_block, probability=self.alpha)
+                if random.random() < self.gamma:
+                    # 模拟区块传播延迟导致的分叉
+                    # 例如，攻击者的区块未被及时传播，导致被忽略
+                    # 可以根据具体情况调整状态转移和奖励
+                    delayed_state = a + h + (
+                        self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
+                    transitions.add(delayed_state, probability=1, reward=0)
+                elif length_a > 0 and length_h > 0:
+                    # 攻击者释放一个区块，影响链长度
+                    new_length_a = length_a - 1
+                    new_length_h = length_h - 1 if length_h > 0 else length_h  # 诚实者链长度不能小于0
 
-                # Add block to honest chain
-                add_transaction = transactions_h < pool
-                new_h = self.add_block(h, add_transaction)
-                honest_block = (
-                        a + new_h + (self.Fork.Relevant, pool - int(add_transaction), length_a,
-                                     self.chain_length(new_h), transactions_a, transactions_h + int(add_transaction))
-                )
-                transitions.add(honest_block, probability=1 - self.alpha)
+                    # 防止链长度小于0的情况
+                    if new_length_h < 0:
+                        new_length_h = 0
+
+                    # 奖励机制：假设攻击者通过释放区块获得奖励
+                    reward = new_length_a / (1 + new_length_a + new_length_h)
+
+                    # 生成新的状态
+                    attacker_block = (
+                            a + h + (
+                        self.Fork.Irrelevant, pool, new_length_a, new_length_h, transactions_a, transactions_h)
+                    )
+                    transitions.add(attacker_block, probability=self.alpha, reward=reward)
+
+                    # 诚实者的区块
+                    honest_block = (
+                            a + h + (
+                        self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
+                    )
+                    transitions.add(honest_block, probability=1 - self.alpha)
+
+                # 如果攻击者链长度小于max_fork且诚实者链长度小于max_fork
+                elif length_a < self.max_fork and length_h < self.max_fork:
+                    if random.random() < self.gamma:
+                        # 模拟区块传播延迟，导致的分叉，影响状态
+                        delayed_state = a + h + (
+                            self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h
+                        )
+                        transitions.add(delayed_state, probability=1, reward=0)  # 没有奖励
+                    else:
+                        # 仍然继续进行区块的添加（攻击者和诚实者各自验证并提交区块）
+                        add_transaction = transactions_a < pool
+                        new_a = self.add_block(a, add_transaction)
+                        attacker_block = (
+                                new_a + h + (
+                            self.Fork.Irrelevant, pool - int(add_transaction), self.chain_length(new_a),
+                            length_h, transactions_a + int(add_transaction), transactions_h)
+                        )
+                        transitions.add(attacker_block, probability=self.alpha)
+
+                        add_transaction = transactions_h < pool
+                        new_h = self.add_block(h, add_transaction)
+                        honest_block = (
+                                a + new_h + (self.Fork.Relevant, pool - int(add_transaction), length_a,
+                                             self.chain_length(new_h), transactions_a,
+                                             transactions_h + int(add_transaction))
+                        )
+                        transitions.add(honest_block, probability=1 - self.alpha)
             else:
                 block = a + h + (self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
                 transitions.add(block, probability=1)
-
-            if reward != 0:
-                logging.basicConfig(level=logging.INFO)
-                logger = logging.getLogger(__name__)
-                logger.info(f"[Step Reward] Action={action} Reward={reward:.4f}")
-                with open("reward_recode.txt", "w") as f:
-                    f.write(f"[Step Reward] Action={action} Reward={reward:.4f}" + "\n")
 
         return transitions
 
@@ -307,7 +307,8 @@ def main():
         gamma=0.5,
         max_fork=10,
         transaction_chance=0.2,
-        max_pool=10
+        max_pool=10,
+        fee=1
     )
 
     print("Model created:", model)

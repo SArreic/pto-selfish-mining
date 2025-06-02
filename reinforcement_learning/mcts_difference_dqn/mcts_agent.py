@@ -21,7 +21,8 @@ class MCTSAgent(BVAAgent):
                  epsilon_step: float, use_boltzmann: bool, boltzmann_temperature: float, target_pi_temperature: float,
                  puct_const: float, use_action_prior: bool, depth: int, mc_simulations: int, warm_up_simulations: int,
                  use_base_approximation: bool, ground_initial_state: bool, use_cached_values: bool, value_clip: float,
-                 nn_factor: float, prune_tree_rate: int, root_dirichlet_noise: float):
+                 nn_factor: float, prune_tree_rate: int, root_dirichlet_noise: float,
+                 planning_strategy: str = "mcts"):
         super().__init__(approximator, simulator, use_cache=False)
 
         if use_boltzmann:
@@ -51,6 +52,10 @@ class MCTSAgent(BVAAgent):
         self.root_dirichlet_noise = root_dirichlet_noise
         assert self.root_dirichlet_noise >= 0
 
+        self.planning_strategy = "mcts"
+        print(self.planning_strategy)
+        assert self.planning_strategy in ["mcts", "greedy", "random"]
+
         self.mc_trajectory_lengths = []
 
         self.monte_carlo_tree_nodes: Dict[BlockchainModel.State, MCTNode] = {}
@@ -68,37 +73,95 @@ class MCTSAgent(BVAAgent):
     def plan_action(self, explore: bool = True) -> Tuple[int, torch.Tensor]:
         state_tuple = self.simulator.torch_to_tuple(self.current_state)
 
-        # mc_sim_revenues = []
-        for _ in range(self.mc_simulations):
-            self.simulate_trajectory(state_tuple, explore)
-            # mc_sim_revenues.append(rev)
+        if self.planning_strategy == "mcts":
+            # mc_sim_revenues = []
+            for _ in range(self.mc_simulations):
+                self.simulate_trajectory(state_tuple, explore)
+                # mc_sim_revenues.append(rev)
 
-        root = self.get_node(state_tuple, explore)
+            root = self.get_node(state_tuple, explore)
 
-        chosen_action = self.invoke_exploration_mechanism(self.exploration_mechanism, root.mc_estimated_q_values,
-                                                          explore)
-        target_value = torch.tensor(root.mc_estimated_q_values[chosen_action], device=self.simulator.device,
-                                    dtype=torch.float)
-        # target_value = torch.tensor(sum(mc_sim_revenues) / self.mc_simulations, device=self.simulator.device,
-        #                             dtype=torch.float)
+            chosen_action = self.invoke_exploration_mechanism(self.exploration_mechanism, root.mc_estimated_q_values,
+                                                              explore)
+            target_value = torch.tensor(root.mc_estimated_q_values[chosen_action], device=self.simulator.device,
+                                        dtype=torch.float)
+            # target_value = torch.tensor(sum(mc_sim_revenues) / self.mc_simulations, device=self.simulator.device,
+            #                             dtype=torch.float)
 
-        if self.use_base_approximation:
-            target_value -= self.base_value_approximation
+            if self.use_base_approximation:
+                target_value -= self.base_value_approximation
 
-        if self.value_clip > 0:
-            target_value = torch.clamp(target_value, -self.value_clip, self.value_clip)
+            if self.value_clip > 0:
+                target_value = torch.clamp(target_value, -self.value_clip, self.value_clip)
 
-        target_value /= self.nn_factor
+            target_value /= self.nn_factor
 
-        action_counts = root.action_counts
-        target_pi = torch.zeros((self.simulator.num_of_actions,), device=self.simulator.device, dtype=torch.float)
-        for action, count in action_counts.items():
-            target_pi[action] = count
+            action_counts = root.action_counts
+            target_pi = torch.zeros((self.simulator.num_of_actions,), device=self.simulator.device, dtype=torch.float)
+            for action, count in action_counts.items():
+                target_pi[action] = count
 
-        target_pi = target_pi.pow(1 / self.target_pi_temperature)
-        target_pi /= target_pi.sum()
+            target_pi = target_pi.pow(1 / self.target_pi_temperature)
+            target_pi /= target_pi.sum()
 
-        return chosen_action, torch.cat([target_value.view(1), target_pi])
+            return chosen_action, torch.cat([target_value.view(1), target_pi])
+
+        elif self.planning_strategy == "greedy":
+            with torch.no_grad():
+                state_value = self.approximator(self.current_state).squeeze()
+                q_values = state_value[:self.simulator.num_of_actions]
+                legal_actions = self.simulator.get_state_legal_actions_tensor(self.current_state)
+                legal_q_values = q_values.masked_fill(~legal_actions, -float('inf'))
+                chosen_action = torch.argmax(legal_q_values).item()
+
+                # 构造 dummy 的 target_pi（独热编码）
+                target_value = legal_q_values[chosen_action]
+                target_pi = torch.zeros_like(q_values)
+                target_pi[chosen_action] = 1.0
+                return chosen_action, torch.cat([target_value.view(1), target_pi])
+
+        elif self.planning_strategy == "random":
+            legal_actions = self.simulator.get_state_legal_actions(self.simulator.torch_to_tuple(self.current_state))
+            chosen_action = np.random.choice(legal_actions)
+
+            # dummy value 和 pi
+            target_value = torch.tensor(0.0, device=self.simulator.device)
+            target_pi = torch.zeros((self.simulator.num_of_actions,), device=self.simulator.device)
+            target_pi[chosen_action] = 1.0
+            return chosen_action, torch.cat([target_value.view(1), target_pi])
+
+        else:
+            # mc_sim_revenues = []
+            for _ in range(self.mc_simulations):
+                self.simulate_trajectory(state_tuple, explore)
+                # mc_sim_revenues.append(rev)
+
+            root = self.get_node(state_tuple, explore)
+
+            chosen_action = self.invoke_exploration_mechanism(self.exploration_mechanism, root.mc_estimated_q_values,
+                                                              explore)
+            target_value = torch.tensor(root.mc_estimated_q_values[chosen_action], device=self.simulator.device,
+                                        dtype=torch.float)
+            # target_value = torch.tensor(sum(mc_sim_revenues) / self.mc_simulations, device=self.simulator.device,
+            #                             dtype=torch.float)
+
+            if self.use_base_approximation:
+                target_value -= self.base_value_approximation
+
+            if self.value_clip > 0:
+                target_value = torch.clamp(target_value, -self.value_clip, self.value_clip)
+
+            target_value /= self.nn_factor
+
+            action_counts = root.action_counts
+            target_pi = torch.zeros((self.simulator.num_of_actions,), device=self.simulator.device, dtype=torch.float)
+            for action, count in action_counts.items():
+                target_pi[action] = count
+
+            target_pi = target_pi.pow(1 / self.target_pi_temperature)
+            target_pi /= target_pi.sum()
+
+            return chosen_action, torch.cat([target_value.view(1), target_pi])
 
     def simulate_trajectory(self, state: BlockchainModel.State, exploring: bool) -> None:
         trajectory = []
