@@ -35,7 +35,13 @@ class TensorboardLoggingCallback(LoggingCallback):
         self.num_of_q_values_in_approximator = num_of_q_values_in_approximator
 
         # Must log something to create the event file
-        self.logger.log('add_graph', agent.approximator, agent.simulator.tuple_to_torch(agent.simulator.initial_state))
+        try:
+            example_input = agent.simulator.tuple_to_torch(agent.simulator.initial_state)
+            self.logger.log('add_graph', agent.approximator, example_input)
+        except Exception as e:
+            print(f"[Warning] Failed to add graph to logger: {e}")
+        # self.logger.log('add_graph', agent.approximator, agent.simulator.tuple_to_torch(
+        # agent.simulator.initial_state))
         self.logger.log('register_layout', self.create_tensorboard_custom_layout())
         self.logger.log('register_hparams', *self.create_tensorboard_hparams_input())
 

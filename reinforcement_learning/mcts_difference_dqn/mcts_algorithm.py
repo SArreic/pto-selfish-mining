@@ -46,7 +46,7 @@ class MCTSAlgorithm(RLAlgorithm):
         nn_factor = self.creation_args.get('nn_factor', 1 / self.simulator.expected_horizon)
         prune_tree_rate = self.creation_args.get('prune_tree_rate', 250)
         root_dirichlet_noise = self.creation_args.get('root_dirichlet_noise', 0.5)
-        planning_strategy = self.creation_args.get('greedy')
+        planning_strategy = self.creation_args.get('ppo')
         return MCTSAgent(
             self.create_approximator(),
             self.simulator,

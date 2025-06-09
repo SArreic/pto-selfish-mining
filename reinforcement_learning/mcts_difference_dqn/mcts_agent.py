@@ -1,9 +1,11 @@
+from torch.distributions import Categorical
 from collections import defaultdict
 from operator import itemgetter
 from typing import Tuple, Optional, Dict
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from blockchain_mdps import BlockchainModel
 from .mct_node import MCTNode
@@ -13,7 +15,9 @@ from ..base.experience_acquisition.experience import Experience
 from ..base.experience_acquisition.exploaration_mechanisms.epsilon_greedy_exploration import EpsilonGreedyExploration
 from ..base.experience_acquisition.exploaration_mechanisms.state_dependant_boltzmann_exploration import \
     StateDependantBoltzmannExploration
+from ..base.experience_acquisition.replay_buffers.ppo_buffer import PPOBuffer
 from ..base.function_approximation.approximator import Approximator
+from ..base.function_approximation.ppo_approximator import PPOApproximator
 
 
 class MCTSAgent(BVAAgent):
@@ -22,7 +26,7 @@ class MCTSAgent(BVAAgent):
                  puct_const: float, use_action_prior: bool, depth: int, mc_simulations: int, warm_up_simulations: int,
                  use_base_approximation: bool, ground_initial_state: bool, use_cached_values: bool, value_clip: float,
                  nn_factor: float, prune_tree_rate: int, root_dirichlet_noise: float,
-                 planning_strategy: str = "mcts"):
+                 planning_strategy: str = "ppo"):
         super().__init__(approximator, simulator, use_cache=False)
 
         if use_boltzmann:
@@ -52,9 +56,24 @@ class MCTSAgent(BVAAgent):
         self.root_dirichlet_noise = root_dirichlet_noise
         assert self.root_dirichlet_noise >= 0
 
-        self.planning_strategy = "mcts"
+        self.planning_strategy = "ppo"
         print(self.planning_strategy)
-        assert self.planning_strategy in ["mcts", "greedy", "random"]
+        assert self.planning_strategy in ["mcts", "greedy", "random", "ppo"]
+
+        if self.planning_strategy == "ppo":
+            state_dim = simulator.state_space_dim
+            action_dim = simulator.num_of_actions
+            self.ppo_approximator = PPOApproximator(state_dim, action_dim)
+            self.policy_net = self.ppo_approximator.policy_net
+            self.value_net = self.ppo_approximator.value_net
+            self.buffer = PPOBuffer(buffer_size=2048)
+            self.optimizer = torch.optim.Adam(
+                list(self.policy_net.parameters()) + list(self.value_net.parameters()), lr=3e-4
+            )
+            self.ppo_epochs = 4
+            self.clip_epsilon = 0.2
+            self.value_coef = 0.5
+            self.entropy_coef = 0.01
 
         self.mc_trajectory_lengths = []
 
@@ -129,6 +148,29 @@ class MCTSAgent(BVAAgent):
             target_pi = torch.zeros((self.simulator.num_of_actions,), device=self.simulator.device)
             target_pi[chosen_action] = 1.0
             return chosen_action, torch.cat([target_value.view(1), target_pi])
+
+        elif self.planning_strategy == "ppo":
+            with torch.no_grad():
+                logits = self.policy_net(self.current_state)
+                legal_actions = self.simulator.get_state_legal_actions_tensor(self.current_state)
+                if not legal_actions.any():
+                    chosen_action = np.random.randint(self.simulator.num_of_actions)
+                    log_prob = torch.tensor(0.0, device=self.simulator.device)
+                    value = self.value_net(self.current_state)
+                    self.buffer.store(self.current_state, chosen_action, log_prob, value)
+                    target_pi = torch.zeros(self.simulator.num_of_actions, device=self.simulator.device)
+                    target_pi[chosen_action] = 1.0
+                    return chosen_action, torch.cat([value.view(1), target_pi])
+
+                logits[~legal_actions] = float('-inf')
+                dist = Categorical(logits=logits)
+                action = dist.sample()
+                log_prob = dist.log_prob(action)
+                value = self.value_net(self.current_state)
+            self.buffer.store(self.current_state, action, log_prob, value)
+            target_pi = torch.zeros(self.simulator.num_of_actions, device=self.simulator.device)
+            target_pi[action] = 1.0
+            return action.item(), torch.cat([value.view(1), target_pi])
 
         else:
             # mc_sim_revenues = []
@@ -314,12 +356,20 @@ class MCTSAgent(BVAAgent):
             return state_evaluation
 
     def step(self, explore: bool = True) -> Experience:
-        exp = super().step(explore)
+        if self.planning_strategy == "ppo":
+            action, _ = self.plan_action(explore)
+            experience = self.simulator.step(action)
+            self.buffer.store_reward(experience.reward, experience.is_done)
+            self.current_state = experience.next_state
+            return experience
 
-        if self.prune_tree_rate > 0 and self.step_idx % self.prune_tree_rate == 0:
-            self.prune_tree()
+        else:
+            exp = super().step(explore)
 
-        return exp
+            if self.prune_tree_rate > 0 and self.step_idx % self.prune_tree_rate == 0:
+                self.prune_tree()
+
+            return exp
 
     def prune_tree(self) -> None:
         self.monte_carlo_tree_nodes = {state: node for state, node in self.monte_carlo_tree_nodes.items() if
@@ -327,9 +377,32 @@ class MCTSAgent(BVAAgent):
 
     def update(self, approximator: Optional[Approximator] = None, base_value_approximation: Optional[float] = None,
                **kwargs) -> None:
-        super().update(approximator, base_value_approximation, **kwargs)
-        self.monte_carlo_tree_nodes = {}
-        self.warm_up()
+        if self.planning_strategy == "ppo":
+            if not self.buffer.ready():
+                return
+            self.buffer.compute_advantages()
+            for _ in range(self.ppo_epochs):
+                for states, actions, old_log_probs, returns, advantages in self.buffer.iterate_batches():
+                    logits = self.policy_net(states)
+                    values = self.value_net(states).squeeze(-1)
+                    dist = Categorical(logits=logits)
+                    entropy = dist.entropy().mean()
+                    new_log_probs = dist.log_prob(actions)
+
+                    ratio = torch.exp(new_log_probs - old_log_probs)
+                    clipped = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
+                    policy_loss = -torch.min(ratio * advantages, clipped * advantages).mean()
+                    value_loss = F.mse_loss(values, returns)
+                    loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
+
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+            self.buffer.reset()
+        else:
+            super().update(approximator, base_value_approximation, **kwargs)
+            self.monte_carlo_tree_nodes = {}
+            self.warm_up()
 
     def reduce_to_v_table(self) -> torch.Tensor:
         # Set the number of simulations to speed things up

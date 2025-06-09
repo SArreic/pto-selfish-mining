@@ -16,7 +16,6 @@ from blockchain_mdps.ethereum_user_model import EthereumUserModel
 from reinforcement_learning import *
 # noinspection PyUnusedLocal
 from reinforcement_learning.base.training.callbacks.bva_callback import BVACallback
-from reinforcement_learning.SAC.sac_trainer import SACTrainer
 
 
 # from rl_log_to_graph import create_performance_figure, create_q_values_graph, create_speed_graph

@@ -54,8 +54,24 @@ class Experience:
 
         self.__dict__ = state
 
+    # @staticmethod
+    # def create_dummy() -> Experience:
+    #     return Experience(prev_state=None, action=None, next_state=None, reward=None, difficulty_contribution=None,
+    #                       prev_difficulty_contribution=None, is_done=None, legal_actions=None, target_value=None,
+    #                       info=None)
+
     @staticmethod
     def create_dummy() -> Experience:
-        return Experience(prev_state=None, action=None, next_state=None, reward=None, difficulty_contribution=None,
-                          prev_difficulty_contribution=None, is_done=None, legal_actions=None, target_value=None,
-                          info=None)
+        return Experience(
+            prev_state=None,
+            action=None,
+            next_state=None,
+            reward=None,
+            difficulty_contribution=None,
+            prev_difficulty_contribution=None,
+            is_done=None,
+            legal_actions=None,
+            target_value=torch.zeros(1),  # 🔁 防止 ReplayBuffer 报错
+            info=None
+        )
+
