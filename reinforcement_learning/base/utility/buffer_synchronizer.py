@@ -63,7 +63,7 @@ class BufferSynchronizer(Buffer):
             intermediate_buffer = [element[1] for element in intermediate_buffer]
 
         for element in intermediate_buffer:
-            if element is not None:
+            if element is not None and element.target_values is not None:
                 self.target_buffer.append(element)
             else:
                 print("[Warning] Dropped invalid experience element")
