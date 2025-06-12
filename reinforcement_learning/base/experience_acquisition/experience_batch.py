@@ -35,12 +35,20 @@ class ExperienceBatch(NamedTuple):
         if all(s.target_value is not None for s in experience_list):
             target_values = torch.stack([s.target_value for s in experience_list]).to(device)
         else:
-            target_values = None
+            action_dim = experience_list[0].legal_actions.shape[0]
+            target_values = torch.zeros(len(experience_list), 1 + action_dim, device=device, dtype=torch.float)
 
-        return ExperienceBatch(prev_states=prev_states, actions=actions, next_states=next_states, rewards=rewards,
-                               difficulty_contributions=difficulty_contributions,
-                               prev_difficulty_contributions=prev_difficulty_contributions, is_done_list=is_done_list,
-                               legal_actions_list=legal_actions_list, target_values=target_values)
+        return ExperienceBatch(
+            prev_states=prev_states,
+            actions=actions,
+            next_states=next_states,
+            rewards=rewards,
+            difficulty_contributions=difficulty_contributions,
+            prev_difficulty_contributions=prev_difficulty_contributions,
+            is_done_list=is_done_list,
+            legal_actions_list=legal_actions_list,
+            target_values=target_values
+        )
 
     def combine(self, other: ExperienceBatch) -> ExperienceBatch:
         prev_states = torch.cat([self.prev_states, other.prev_states])
@@ -52,9 +60,16 @@ class ExperienceBatch(NamedTuple):
             [self.prev_difficulty_contributions, other.prev_difficulty_contributions])
         is_done_list = torch.cat([self.is_done_list, other.is_done_list])
         legal_actions_list = torch.cat([self.legal_actions_list, other.legal_actions_list])
-        assert isinstance(other, ExperienceBatch), "Only ExperienceBatch can be combined"
-        assert self.target_values is not None and other.target_values is not None, "target_values missing!"
-        target_values = torch.cat([self.target_values, other.target_values])
+        # assert isinstance(other, ExperienceBatch), "Only ExperienceBatch can be combined"
+        # assert self.target_values is not None and other.target_values is not None, "target_values missing!"
+        if self.target_values is None and other.target_values is None:
+            target_values = None
+        elif self.target_values is None:
+            target_values = other.target_values
+        elif other.target_values is None:
+            target_values = self.target_values
+        else:
+            target_values = torch.cat([self.target_values, other.target_values])
 
         return ExperienceBatch(prev_states=prev_states, actions=actions, next_states=next_states, rewards=rewards,
                                difficulty_contributions=difficulty_contributions,

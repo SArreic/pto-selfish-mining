@@ -149,28 +149,32 @@ class MCTSAgent(BVAAgent):
             target_pi[chosen_action] = 1.0
             return chosen_action, torch.cat([target_value.view(1), target_pi])
 
-        elif self.planning_strategy == "ppo":
+        if self.planning_strategy == "ppo":
             with torch.no_grad():
                 logits = self.policy_net(self.current_state)
                 legal_actions = self.simulator.get_state_legal_actions_tensor(self.current_state)
+
                 if not legal_actions.any():
-                    chosen_action = np.random.randint(self.simulator.num_of_actions)
+                    action = np.random.randint(self.simulator.num_of_actions)
                     log_prob = torch.tensor(0.0, device=self.simulator.device)
                     value = self.value_net(self.current_state)
-                    self.buffer.store(self.current_state, chosen_action, log_prob, value)
-                    target_pi = torch.zeros(self.simulator.num_of_actions, device=self.simulator.device)
-                    target_pi[chosen_action] = 1.0
-                    return chosen_action, torch.cat([value.view(1), target_pi])
+                else:
+                    logits[~legal_actions] = float('-inf')
+                    dist = Categorical(logits=logits)
+                    action = dist.sample().item()
+                    log_prob = dist.log_prob(torch.tensor(action, device=self.simulator.device))
+                    value = self.value_net(self.current_state)
 
-                logits[~legal_actions] = float('-inf')
-                dist = Categorical(logits=logits)
-                action = dist.sample()
-                log_prob = dist.log_prob(action)
-                value = self.value_net(self.current_state)
-            self.buffer.store(self.current_state, action, log_prob, value)
+            # 存储 PPO 数据
+            self.buffer.store(self.current_state, torch.tensor(action), log_prob, value)
+
+            # ⚠️ 注意：plan_action 不调用 simulator.step
+            # simulator.step 只能在 step() 中调用，保持单一职责
+
             target_pi = torch.zeros(self.simulator.num_of_actions, device=self.simulator.device)
             target_pi[action] = 1.0
-            return action.item(), torch.cat([value.view(1), target_pi])
+
+            return action, torch.cat([value.view(1), target_pi])
 
         else:
             # mc_sim_revenues = []
@@ -359,7 +363,15 @@ class MCTSAgent(BVAAgent):
         if self.planning_strategy == "ppo":
             action, _ = self.plan_action(explore)
             experience = self.simulator.step(action)
+
             self.buffer.store_reward(experience.reward, experience.is_done)
+            self.buffer.store_transition_extra(
+                next_state=experience.next_state,
+                legal_actions=self.simulator.get_state_legal_actions_tensor(experience.next_state),
+                difficulty=experience.difficulty_contribution,
+                prev_difficulty=experience.prev_difficulty_contribution,
+            )
+
             self.current_state = experience.next_state
             return experience
 

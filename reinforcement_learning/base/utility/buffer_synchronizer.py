@@ -54,17 +54,21 @@ class BufferSynchronizer(Buffer):
                     element = self.synchronization_buffer.get()
                 else:
                     element = self.synchronization_buffer.get_nowait()
-                print(f"[Debug] element type: {type(element)}, content: {element}")
+                # print(f"[Debug] element type: {type(element)}, content: {element}")
                 intermediate_buffer.append(element)
         except Empty:
             pass
+        except Exception as e:
+            print(f"[Error] Exception occurred during processing: {e}")
+            print(f"[Error] Last element was: {element}, type: {type(element)}")
+            raise
 
         if self.sort:
             intermediate_buffer.sort(key=itemgetter(0))
             intermediate_buffer = [element[1] for element in intermediate_buffer]
 
         for element in intermediate_buffer:
-            if element is not None and element.target_values is not None:
+            if element is not None:
                 self.target_buffer.append(element)
             else:
                 print("[Warning] Dropped invalid experience element")
