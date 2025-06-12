@@ -17,7 +17,7 @@ from ..base.experience_acquisition.exploaration_mechanisms.state_dependant_boltz
     StateDependantBoltzmannExploration
 from ..base.experience_acquisition.replay_buffers.ppo_buffer import PPOBuffer
 from ..base.function_approximation.approximator import Approximator
-from ..base.function_approximation.ppo_approximator import PPOApproximator
+from ..base.function_approximation.ppo_approximator import PPOApproximator, CompatibleApproximatorWrapper
 
 
 class MCTSAgent(BVAAgent):
@@ -63,7 +63,7 @@ class MCTSAgent(BVAAgent):
         if self.planning_strategy == "ppo":
             state_dim = simulator.state_space_dim
             action_dim = simulator.num_of_actions
-            self.ppo_approximator = PPOApproximator(state_dim, action_dim)
+            self.ppo_approximator = CompatibleApproximatorWrapper(PPOApproximator(state_dim, action_dim))
             self.policy_net = self.ppo_approximator.policy_net
             self.value_net = self.ppo_approximator.value_net
             self.buffer = PPOBuffer(buffer_size=2048)

@@ -1,394 +1,360 @@
-import argparse
-import itertools
-import signal
-import sys
-from pathlib import Path
-from typing import Tuple, Any, List, Type
-
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
-from numpy import single
-
-from blockchain_mdps import *
-from blockchain_mdps.avalanche_fee_model import EthereumPosModel
-from blockchain_mdps.avalanche_model import AvalancheAttackModel
-from blockchain_mdps.base.blockchain_mdps.blockchain_mdp import BlockchainMDP
-from blockchain_mdps.ethereum2_fee_model import Ethereum2FeeModel
-from blockchain_mdps.ethereum2_model import Ethereum2Model
-from reinforcement_learning import *
-# noinspection PyUnusedLocal
-from reinforcement_learning.base.training.callbacks.bva_callback import BVACallback
-
-
-# from rl_log_to_graph import create_performance_figure, create_q_values_graph, create_speed_graph
-
-
-# noinspection PyUnusedLocal
-def interrupt_handler(signum: int, frame: Any) -> None:
-    # For exiting gracefully
-    print(f'Process interrupted with signal {signum}')
-    raise InterruptedError('Process interrupted')
-
-
-def solve_mdp_exactly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
-    expected_horizon = int(1e4)
-    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    p, r, _, _ = solver.calc_opt_policy(epsilon=1e-7, max_iter=int(1e10))  # Singular Matrix Detected Here
-    sys.stdout.flush()
-    revenue = solver.mdp.calc_policy_revenue(p)
-    return np.float32(revenue), p
-
-
-def solve_mdp_randomly(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
-    np.random.seed(42)  # For reproducibility
-    expected_horizon = int(1)
-    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    policy = tuple(np.random.choice(solver.mdp.num_of_actions) for _ in range(solver.mdp.num_of_states))
-    revenue = solver.mdp.calc_policy_revenue(policy)
-    return np.float32(revenue), policy
-
-
-def solve_mdp_greedily(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
-    expected_horizon = int(1e1)
-    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    policy = []
-    for state in range(solver.mdp.num_of_states):
-        best_action = None
-        best_reward = -np.inf
-        for action in range(solver.mdp.num_of_actions):
-            reward = solver.mdp.R.get_val(action, state, state)
-            if reward > best_reward:
-                best_reward = reward
-                best_action = action
-        policy.append(best_action)
-    policy = Tuple[np.array(policy)]
-    revenue = solver.mdp.calc_policy_revenue(policy)
-    return np.float32(revenue), tuple(policy)
-
-
-def solve_mdp_brute_force(mdp: BlockchainModel) -> Tuple[float, BlockchainModel.Policy]:
-    expected_horizon = int(1)
-    solver = PTOSolver(mdp, expected_horizon=expected_horizon)
-    best_policy = None
-    best_revenue = -np.inf
-    for policy in itertools.product(range(solver.mdp.num_of_actions), repeat=solver.mdp.num_of_states):
-        revenue = solver.mdp.calc_policy_revenue(policy)
-        if revenue > best_revenue:
-            best_revenue = revenue
-            best_policy = policy
-    return np.float32(best_revenue), best_policy
-
-
-def solve_mdp_approx(mdp: BlockchainModel, method: str = 'greedy') -> Tuple[float, BlockchainModel.Policy]:
-    if method == 'random':
-        return solve_mdp_randomly(mdp)
-    elif method == 'greedy':
-        return solve_mdp_greedily(mdp)
-    elif method == 'brute':
-        return solve_mdp_brute_force(mdp)
-    else:
-        raise ValueError("Unknown method: choose from 'random', 'greedy', 'brute_force'.")
-
-
-def log_solution_info(mdp: BlockchainModel, rev: float, trainer: Trainer) -> float:
-    policy_rev = PTOSolver(mdp).mdp.calc_policy_revenue(trainer.orchestrator.agent.reduce_to_policy())
-    trainer.log_info(f'Number of states: {mdp.state_space.size}')
-    trainer.log_info(f'Optimal Revenue in ARR-MDP: {rev}')
-    trainer.log_info(f'Policy Revenue in ARR-MDP: {policy_rev}')
-
-    return policy_rev
-
-
-def solve_pt(args: argparse.Namespace) -> None:
-    # mdp = EthereumModel(alpha=0.35, max_fork=200)
-    mdp = BitcoinModel(alpha=0.35, gamma=0.5, max_fork=20)
-    # mdp = SimpleModel(alpha=0.35, max_fork=200)
-    # mdp = BitcoinFeeModel(alpha=0.35, gamma=0.5, max_fork=2, fee=2, transaction_chance=0.1, max_pool=2)
-    smart_init = 0.35
-    print(f'{mdp.state_space.size:,}')
-    rev, _ = solve_mdp_exactly(mdp)
-
-    trainer = LDDQNTrainer(mdp, orchestrator_type='synced_multi_process', build_info=args.build_info, random_seed=0,
-                           output_root=args.output_root, expected_horizon=10_000, depth=10, batch_size=100,
-                           dropout=0, starting_epsilon=0.01, epsilon_step=0, bva_smart_init=smart_init,
-                           num_of_episodes_for_average=100, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
-                           epoch_length=10_000, num_of_epochs=1000, replay_buffer_size=20_000,
-                           use_base_approximation=True, ground_initial_state=False,
-                           train_episode_length=1000, evaluate_episode_length=1000,
-                           number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                           # number_of_evaluation_agents=1, number_of_training_agents=1,
-                           lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
-                           output_value_heatmap=False, normalize_target_values=True, use_cached_values=False)
-
-    trainer.run()
-
-    log_solution_info(mdp, rev, trainer)
-
-
-def solve_pt_multiple_times(args: argparse.Namespace, times: int = 10) -> None:
-    # mdp = BitcoinModel(alpha=0.35, gamma=0.5, max_fork=200)
-    mdp = SimpleModel(alpha=0.35, max_fork=200)
-    print(f'{mdp.state_space.size:,}')
-    rev, _ = solve_mdp_exactly(mdp)
-
-    solution_revenues = np.zeros(times)
-    simulation_values = pd.DataFrame(columns=['Iteration', 'Run', 'Base Value'])
-
-    for run_index in range(times):
-        print(f'Training Iteration {run_index}')
-        trainer = LDDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-                               output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-                               dropout=0.0, starting_epsilon=0.01, epsilon_step=0,
-                               num_of_episodes_for_average=20, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
-                               epoch_length=10000, epoch_size=10000, num_of_epochs=150, replay_buffer_size=20000,
-                               use_base_approximation=True, ground_initial_state=False,
-                               train_episode_length=10000, evaluate_episode_length=10000,
-                               number_of_evaluation_agents=args.eval_agents,
-                               number_of_training_agents=args.train_agents,
-                               # number_of_evaluation_agents=1, number_of_training_agents=1,
-                               lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev,
-                               normalize_target_values=True)
-
-        trainer.run()
-
-        bva_callback = trainer.get_callbacks_of_type(BVACallback)[0]
-
-        num_of_epochs = len(bva_callback.epoch_history)
-        df = pd.DataFrame({'Iteration': range(num_of_epochs),
-                           'Run': [run_index] * num_of_epochs,
-                           'Base Value': bva_callback.epoch_history})
-
-        simulation_values = simulation_values.append(df, ignore_index=True)
-
-        # for index, value in enumerate(bva_callback.epoch_history):
-        #    simulation_values = simulation_values.append({'Iteration': index, 'Run': run_index, 'Base Value': value},
-        #                                                 ignore_index=True)
-
-        policy_rev = log_solution_info(mdp, rev, trainer)
-        solution_revenues[run_index] = policy_rev
-
-    fig, ax = plt.subplots()
-    sns.lineplot(x='Iteration', y='Base Value', data=simulation_values, ax=ax)
-    fig.show()
-    out_dir = f'{args.output_root}/{args.build_info}/' if args.output_root is not None else ''
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
-    fig.savefig(f'{out_dir}out/run_simulation_values.png')
-
-    fig, ax = plt.subplots()
-    sns.histplot(solution_revenues, kde=True, line_kws={'label': 'Agent Policy'}, ax=ax)
-    ax.set_xlabel('Final Policy Revenue')
-    ax.set_ylabel('Number of Runs')
-    limits = ax.get_ylim()
-    ax.vlines(x=rev, ymin=limits[0], ymax=limits[1], label='Optimal', linestyles='dashed', colors='k')
-    ax.legend()
-    # ax.bar(range(len(solution_revenues)), solution_revenues)
-    # limits = ax.get_xlim()
-    # ax.hlines(y=rev, xmin=limits[0], xmax=limits[1], label='Optimal', linestyles='dashed', colors='k')
-    fig.show()
-    fig.savefig(f'{out_dir}out/run_solution_values.png')
-
-
-def solve_sm(args: argparse.Namespace) -> None:
-    mdp = BitcoinModel(alpha=0.35, gamma=0.5, max_fork=10)
-    print(f'{mdp.state_space.size:,}')
-    rev, _ = solve_mdp_exactly(mdp)
-
-    trainer = LSMDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-                            output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-                            starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
-                            nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
-                            train_episode_length=10000, evaluate_episode_length=1000,
-                            use_base_approximation=True, ground_initial_state=False,
-                            number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                            lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
-
-    trainer.run()
-
-    log_solution_info(mdp, rev, trainer)
-
-
-def solve_fees(args: argparse.Namespace) -> None:
-    mdp = BitcoinFeeModel(alpha=0.35, gamma=0.5, max_fork=10, fee=2, transaction_chance=0.1, max_pool=10)
-    print(f'{mdp.state_space.size:,}')
-
-    trainer = LDDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-                           output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-                           starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
-                           nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
-                           rain_episode_length=10000, evaluate_episode_length=1000,
-                           use_base_approximation=True, ground_initial_state=False,
-                           number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                           lower_priority=args.no_bg, bind_all=args.bind_all)
-
-    trainer.run()
-
-
-def test_mcts(args: argparse.Namespace) -> None:
-    mdp = BitcoinModel(alpha=0.35, gamma=0.5, max_fork=3)
-    print(f'{mdp.state_space.size:,}')
-    rev, p = solve_mdp_exactly(mdp)
-
-    trainer = LDDQNTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-                           output_root=args.output_root, expected_horizon=1e4, depth=10, batch_size=100,
-                           starting_epsilon=0.05, epsilon_step=0, num_of_episodes_for_average=50, learning_rate=2e-5,
-                           nn_factor=0.01, huber_beta=1, num_of_epochs=1000,
-                           train_episode_length=10000, evaluate_episode_length=1000,
-                           use_base_approximation=True, ground_initial_state=False,
-                           number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                           lower_priority=args.no_bg, bind_all=args.bind_all, stop_goal=rev)
-
-    trainer.run()
-
-    solver = PTOSolver(mdp).mdp
-    policy_rev = solver.calc_policy_revenue(trainer.orchestrator.agent.reduce_to_policy())
-
-    q_table = trainer.orchestrator.agent.reduce_to_q_table()
-    q_table = q_table.detach().clone()
-
-    q_table_policy = trainer.orchestrator.agent.reduce_to_policy_from_q_table(q_table)
-    q_table_policy_rev = solver.calc_policy_revenue(q_table_policy)
-
-    trainer.log_info(f'Policy Revenue in ARR-MDP: {policy_rev}')
-    trainer.log_info(f'Q Table Policy Revenue in ARR-MDP: {q_table_policy_rev}')
-
-    mdp.print_policy(p, solver.find_reachable_states(p), x_axis=1, y_axis=0, z_axis=2)
-
-    trainer = MCTSTrainer(mdp, build_info=args.build_info, output_root=args.output_root,
-                          expected_horizon=1e4, depth=50, batch_size=100, starting_epsilon=0.05, epsilon_step=0,
-                          num_of_episodes_for_average=50, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
-                          momentum=0.9, mc_simulations=5, use_base_approximation=True, ground_initial_state=False,
-                          num_of_epochs=1000, train_episode_length=10000, evaluate_episode_length=1000,
-                          number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                          lower_priority=args.no_bg, bind_all=args.bind_all,
-                          cross_entropy_loss_weight=1, puct_const=10, target_pi_temperature=2, stop_goal=rev,
-                          use_action_prior=True, use_table=False, visualize_every_episode=False)
-
-    with trainer:
-        trainer.run()
-
-    log_solution_info(mdp, rev, trainer)
-
-
-def run_mcts(args: argparse.Namespace):
-    mdp = BitcoinModel(alpha=0.35, gamma=0.5, max_fork=200)
-    # mdp = EthereumModel(alpha=0.35, max_fork=20)
-    print(f'{mdp.state_space.size:,}')
-    # rev, _ = solve_mdp_exactly(mdp)
-
-    trainer = MCTSTrainer(mdp, orchestrator_type='multi_process', build_info=args.build_info,
-                          output_root=args.output_root, output_profile=True, expected_horizon=1e4, depth=10,
-                          batch_size=100, dropout=0, starting_epsilon=0.01, epsilon_step=0,
-                          num_of_episodes_for_average=100, learning_rate=2e-4, nn_factor=0.001, huber_beta=1,
-                          epoch_length=10000, epoch_size=10000, num_of_epochs=1000, replay_buffer_size=20000,
-                          use_base_approximation=True, ground_initial_state=False, prune_tree_rate=200,
-                          train_episode_length=10000, evaluate_episode_length=2000,
-                          number_of_evaluation_agents=args.eval_agents, number_of_training_agents=args.train_agents,
-                          lower_priority=args.no_bg, bind_all=args.bind_all, output_value_heatmap=False,
-                          normalize_target_values=True, use_cached_values=False)
-
-    trainer.run()
-
-    # log_solution_info(mdp, rev, trainer)
-
-
-def run_mcts_fees(args: argparse.Namespace):
-    alpha = args.alpha
-    beta = args.beta
-    gamma = args.gamma
-    max_fork = args.max_fork
-    fee = args.fee
-    pool = args.pool
-    clock = args.clock
-    transaction_chance = args.delta
-    simple_mdp = AvalancheAttackModel(alpha=alpha, gamma=beta, max_forks=max_fork, fee=fee, pool=pool,
-                                      clock=clock)
-    # rev, _ = solve_mdp_approx(simple_mdp, method='random')
-    rev, _ = solve_mdp_exactly(simple_mdp)
-    print("rev is ", rev)
-    print("The best policy is {}".format(_))
-    rev = rev if -1 <= rev <= 1 else (-1 if rev < -1 else 1)
-    mdp = EthereumPosModel(alpha=alpha, gamma=gamma, clock=clock, fee=fee, max_forks=max_fork, pool=pool,
-                           transaction_chance=transaction_chance)
-
-    # mdp = Ethereum2FeeModel()
-
-    smart_init = rev * (1 + fee * transaction_chance)
-    print("rev is {}, fee is {}, transaction chance is {}".format(rev, fee, transaction_chance))
-    print("smart_init is {}".format(smart_init))
-    # smart_init = None
-
-    print(f'{mdp.state_space.size:,}')
-
-    trainer = MCTSTrainer(
-        mdp,
-        orchestrator_type='synced_multi_process',
-        build_info=args.build_info,
-        output_root=args.output_root,
-        output_profile=False,
-        output_memory_snapshots=False,
-        random_seed=args.seed,
-        expected_horizon=10_000,
-        depth=5,
-        batch_size=100,
-        dropout=0,
-        length_factor=10,
-        starting_epsilon=0.05,
-        epsilon_step=0,
-        bva_smart_init=smart_init,
-        prune_tree_rate=250,
-        num_of_episodes_for_average=1000,
-        learning_rate=args.lr,
-        nn_factor=0.0001,
-        mc_simulations=25,
-        num_of_epochs=5001,
-        epoch_shuffles=2,
-        save_rate=100,
-        use_base_approximation=True,
-        ground_initial_state=False,
-        train_episode_length=100,
-        evaluate_episode_length=100,
-        lr_decay_epoch=1000,
-        number_of_training_agents=args.train_agents,
-        number_of_evaluation_agents=args.eval_agents,
-        lower_priority=args.no_bg,
-        bind_all=args.bind_all,
-        load_experiment=args.load_experiment,
-        output_value_heatmap=False,
-        normalize_target_values=True,
-        use_cached_values=False
-    )
-
-    trainer.run()
-
-
-if __name__ == '__main__':
-    signal.signal(signal.SIGINT, interrupt_handler)
-    signal.signal(signal.SIGTERM, interrupt_handler)
-
-    parser = argparse.ArgumentParser(description='Run Deep RL for selfish mining in blockchain')
-    parser.add_argument('--build_info', help='build identifier', default=None)
-    parser.add_argument('--output_root', help='root destination for all output files', default=None)
-    parser.add_argument('--train_agents', help='number of agents spawned to train', default=5, type=int)
-    parser.add_argument('--eval_agents', help='number of agents spawned to evaluate', default=2, type=int)
-    parser.add_argument('--no_bg', help='don\'t run the process in the background', action='store_false')
-    parser.add_argument('--bind_all', help='pass bind_all to tensorboard', action='store_true')
-    parser.add_argument('--load_experiment', help='name of experiment to continue', default=None)
-    # parser.add_argument('--alpha', help='miner size', default=0.01, type=float)
-    parser.add_argument('--alpha', help='honest rate', default=0.4, type=float)
-    parser.add_argument('--beta', help='attacker rate', default=0.6, type=float)
-    parser.add_argument('--gamma', help='rushing factor', default=0.95, type=float)
-    # parser.add_argument('--max_depth', help='maximum depth of user chain', default=5, type=int)
-    parser.add_argument('--max_fork', help='maximal fork size', default=5, type=int)
-    # parser.add_argument('--tax', help='tax raised for each block', default=0.1, type=float)
-    parser.add_argument('--pool', help='reward pool for security improvements', default=0, type=float)
-    parser.add_argument('--clock', help='clock for each epoch', default=10, type=float)
-    parser.add_argument('--fee', help='transaction fee', default=0.1, type=float)
-    # parser.add_argument('--delta', help='chance for a transaction', default=0.01, type=float)
-    parser.add_argument('--delta', help='chance for a transaction', default=0.05, type=float)
-    parser.add_argument('--seed', help='random seed', default=0, type=int)
-    parser.add_argument('--lr', help='learning_rate', default=2e-4, type=float)
-
-    # solve_pt(parser.parse_args())
-    run_mcts_fees(parser.parse_args())
+# from torch.distributions import Categorical
+# from collections import defaultdict
+# from operator import itemgetter
+# from typing import Tuple, Optional, Dict
+#
+# import numpy as np
+# import torch
+# import torch.nn.functional as F
+#
+# from blockchain_mdps import BlockchainModel
+# from .mct_node import MCTNode
+# from ..base.blockchain_simulator.mdp_blockchain_simulator import MDPBlockchainSimulator
+# from ..base.experience_acquisition.agents.bva_agent import BVAAgent
+# from ..base.experience_acquisition.experience import Experience
+# from ..base.experience_acquisition.exploaration_mechanisms.epsilon_greedy_exploration import EpsilonGreedyExploration
+# from ..base.experience_acquisition.exploaration_mechanisms.state_dependant_boltzmann_exploration import \
+#     StateDependantBoltzmannExploration
+# from ..base.experience_acquisition.replay_buffers.ppo_buffer import PPOBuffer
+# from ..base.function_approximation.approximator import Approximator
+# from ..base.function_approximation.ppo_approximator import PPOApproximator
+#
+#
+# class MCTSAgent(BVAAgent):
+#     def __init__(self, approximator: Approximator, simulator: MDPBlockchainSimulator, starting_epsilon: float,
+#                  epsilon_step: float, use_boltzmann: bool, boltzmann_temperature: float, target_pi_temperature: float,
+#                  puct_const: float, use_action_prior: bool, depth: int, mc_simulations: int, warm_up_simulations: int,
+#                  use_base_approximation: bool, ground_initial_state: bool, use_cached_values: bool, value_clip: float,
+#                  nn_factor: float, prune_tree_rate: int, root_dirichlet_noise: float,
+#                  planning_strategy: str = "ppo"):
+#         super().__init__(approximator, simulator, use_cache=False)
+#
+#         if use_boltzmann:
+#             self.exploration_mechanism = StateDependantBoltzmannExploration(boltzmann_temperature)
+#         else:
+#             self.exploration_mechanism = EpsilonGreedyExploration(starting_epsilon, epsilon_step)
+#
+#         self.target_pi_temperature = target_pi_temperature
+#         self.puct_const = puct_const
+#         self.use_action_prior = use_action_prior
+#
+#         self.depth = depth
+#         assert self.depth > 0
+#         self.mc_simulations = mc_simulations
+#         assert self.mc_simulations > 0
+#         self.warm_up_simulations = warm_up_simulations
+#
+#         self.use_base_approximation = use_base_approximation
+#         self.ground_initial_state = ground_initial_state
+#         self.use_cached_values = use_cached_values
+#         self.value_clip = value_clip
+#         assert self.value_clip >= 0
+#         self.nn_factor = nn_factor
+#         assert self.nn_factor >= 0
+#         self.prune_tree_rate = prune_tree_rate
+#         assert self.prune_tree_rate >= 0
+#         self.root_dirichlet_noise = root_dirichlet_noise
+#         assert self.root_dirichlet_noise >= 0
+#
+#         self.planning_strategy = "ppo"
+#         print(self.planning_strategy)
+#         assert self.planning_strategy in ["mcts", "greedy", "random", "ppo"]
+#
+#         if self.planning_strategy == "ppo":
+#             state_dim = simulator.state_space_dim
+#             action_dim = simulator.num_of_actions
+#             self.ppo_approximator = PPOApproximator(state_dim, action_dim)
+#             self.policy_net = self.ppo_approximator.policy_net
+#             self.value_net = self.ppo_approximator.value_net
+#             self.buffer = PPOBuffer(buffer_size=2048)
+#             self.optimizer = torch.optim.Adam(
+#                 list(self.policy_net.parameters()) + list(self.value_net.parameters()), lr=3e-4
+#             )
+#             self.ppo_epochs = 4
+#             self.clip_epsilon = 0.2
+#             self.value_coef = 0.5
+#             self.entropy_coef = 0.01
+#
+#         self.mc_trajectory_lengths = []
+#
+#         self.monte_carlo_tree_nodes: Dict[BlockchainModel.State, MCTNode] = {}
+#
+#     def __repr__(self) -> str:
+#         d = {'type': self.__class__.__name__, 'exploration_mechanism': self.exploration_mechanism, 'depth': self.depth,
+#              'simulations': self.mc_simulations, 'ground_initial_state': self.ground_initial_state,
+#              'value_clip': self.value_clip, 'nn_factor': self.nn_factor}
+#         return str(d)
+#
+#     def warm_up(self) -> None:
+#         for _ in range(self.warm_up_simulations):
+#             self.simulate_trajectory(self.simulator.torch_to_tuple(self.current_state), False)
+#
+#     def plan_action(self, explore: bool = True) -> Tuple[int, torch.Tensor]:
+#         state_tuple = self.simulator.torch_to_tuple(self.current_state)
+#         if self.planning_strategy == "ppo":
+#             with torch.no_grad():
+#                 logits = self.policy_net(self.current_state)
+#                 legal_actions = self.simulator.get_state_legal_actions_tensor(self.current_state)
+#                 if not legal_actions.any():
+#                     chosen_action = np.random.randint(self.simulator.num_of_actions)
+#                     log_prob = torch.tensor(0.0, device=self.simulator.device)
+#                     value = self.value_net(self.current_state)
+#                     self.buffer.store(self.current_state, chosen_action, log_prob, value)
+#                     target_pi = torch.zeros(self.simulator.num_of_actions, device=self.simulator.device)
+#                     target_pi[chosen_action] = 1.0
+#                     return chosen_action, torch.cat([value.view(1), target_pi])
+#
+#                 logits[~legal_actions] = float('-inf')
+#                 dist = Categorical(logits=logits)
+#                 action = dist.sample()
+#                 log_prob = dist.log_prob(action)
+#                 value = self.value_net(self.current_state)
+#             self.buffer.store(self.current_state, action, log_prob, value)
+#             target_pi = torch.zeros(self.simulator.num_of_actions, device=self.simulator.device)
+#             target_pi[action] = 1.0
+#             return action.item(), torch.cat([value.view(1), target_pi])
+#
+#         else:
+#             # mc_sim_revenues = []
+#             for _ in range(self.mc_simulations):
+#                 self.simulate_trajectory(state_tuple, explore)
+#                 # mc_sim_revenues.append(rev)
+#
+#             root = self.get_node(state_tuple, explore)
+#
+#             chosen_action = self.invoke_exploration_mechanism(self.exploration_mechanism, root.mc_estimated_q_values,
+#                                                               explore)
+#             target_value = torch.tensor(root.mc_estimated_q_values[chosen_action], device=self.simulator.device,
+#                                         dtype=torch.float)
+#             # target_value = torch.tensor(sum(mc_sim_revenues) / self.mc_simulations, device=self.simulator.device,
+#             #                             dtype=torch.float)
+#
+#             if self.use_base_approximation:
+#                 target_value -= self.base_value_approximation
+#
+#             if self.value_clip > 0:
+#                 target_value = torch.clamp(target_value, -self.value_clip, self.value_clip)
+#
+#             target_value /= self.nn_factor
+#
+#             action_counts = root.action_counts
+#             target_pi = torch.zeros((self.simulator.num_of_actions,), device=self.simulator.device, dtype=torch.float)
+#             for action, count in action_counts.items():
+#                 target_pi[action] = count
+#
+#             target_pi = target_pi.pow(1 / self.target_pi_temperature)
+#             target_pi /= target_pi.sum()
+#
+#             return chosen_action, torch.cat([target_value.view(1), target_pi])
+#
+#     def simulate_trajectory(self, state: BlockchainModel.State, exploring: bool) -> None:
+#         trajectory = []
+#
+#         for depth in range(self.depth):
+#             current_node = self.get_node(state, exploring)
+#             self.expand_node(state, exploring, depth)
+#             action_puct_values = self.calculate_action_puct_values(current_node, depth)
+#             action = max(action_puct_values.items(), key=itemgetter(1))[0]
+#
+#             trajectory.append((state, action))
+#
+#             current_node.visit_count += 1
+#             current_node.action_counts[action] += 1
+#
+#             state = self.simulator.make_random_transition(current_node.action_state_transitions[action])
+#
+#             if self.ground_initial_state and self.simulator.is_initial_state(state):
+#                 break
+#
+#         for state, action in reversed(trajectory):
+#             self.update_node_action_value(state, action, exploring)
+#
+#         self.mc_trajectory_lengths.append(len(trajectory))
+#
+#     def reset(self, state: Optional[BlockchainModel.State] = None, keep_state: bool = False) -> None:
+#         self.mc_trajectory_lengths = []
+#         super().reset(state, keep_state)
+#
+#     def get_node(self, state: BlockchainModel.State, exploring: bool) -> MCTNode:
+#         if state not in self.monte_carlo_tree_nodes:
+#             legal_actions = self.simulator.get_state_legal_actions(state)
+#
+#             action_state_transitions = {}
+#             for action in legal_actions:
+#                 action_state_transitions[action] = self.simulator.get_state_transition_values(state, action)
+#
+#             evaluation = self.get_state_evaluation(state, exploring)
+#             approximated_value = np.float32(evaluation[0].item())
+#
+#             prior_action_probabilities = defaultdict(lambda: 1.0)
+#
+#             if self.use_action_prior:
+#                 for legal_action in legal_actions:
+#                     prior_action_probabilities[legal_action] = np.float32(evaluation[legal_action + 1].item())
+#
+#             self.monte_carlo_tree_nodes[state] = MCTNode(state, legal_actions, action_state_transitions,
+#                                                          approximated_value, prior_action_probabilities)
+#
+#         return self.monte_carlo_tree_nodes[state]
+#
+#     def expand_node(self, state: BlockchainModel.State, exploring: bool, depth: int) -> None:
+#         node = self.get_node(state, exploring)
+#         if node.expanded:
+#             return
+#
+#         use_nn = depth == self.depth and not self.use_cached_values
+#         for action in node.legal_actions:
+#             node.mc_estimated_q_values[action] = self.calculate_mean_action_value(state, action, exploring, use_nn)
+#
+#         node.expanded = True
+#
+#     def calculate_mean_action_value(self, state: BlockchainModel.State, action: int, exploring: bool,
+#                                     use_nn: bool = False) -> float:
+#         transition_values = self.get_node(state, exploring).action_state_transitions[action]
+#         total_value = 0
+#         for next_state in transition_values.probabilities.keys():
+#             value = self.get_node(next_state, exploring).get_value(use_nn)
+#
+#             if self.ground_initial_state and self.simulator.is_initial_state(next_state):
+#                 value = self.get_node(next_state, exploring).approximated_value
+#
+#             # Discount by difficulty contribution
+#             value *= self.calculate_difficulty_contribution_discount(
+#                 transition_values.difficulty_contributions[next_state])
+#
+#             # Add transition reward
+#             value += transition_values.rewards[next_state] / self.simulator.expected_horizon
+#
+#             # Multiply by transition probability
+#             value *= transition_values.probabilities[next_state]
+#
+#             total_value += value
+#
+#         return total_value
+#
+#     def calculate_difficulty_contribution_discount(self, difficulty_contribution: float) -> float:
+#         return (1 - 1 / self.simulator.expected_horizon) ** difficulty_contribution
+#
+#     def update_node_action_value(self, state: BlockchainModel.State, action: int, exploring: bool) -> None:
+#         node = self.get_node(state, exploring)
+#
+#         sampled_action_value = self.calculate_mean_action_value(node.state, action, exploring)
+#
+#         if self.use_cached_values:
+#             node.mc_estimated_q_values[action] = sampled_action_value
+#         else:
+#             action_count = node.action_counts[action]
+#             # print(action_count)
+#             node.mc_estimated_q_values[action] *= (action_count - 1) / action_count
+#             node.mc_estimated_q_values[action] += sampled_action_value / action_count
+#
+#     def calculate_action_puct_values(self, node: MCTNode, depth: int) -> Dict[int, float]:
+#         puct_values = {}
+#         num_of_actions = len(node.mc_estimated_q_values)
+#         for action, q_value in node.mc_estimated_q_values.items():
+#             exploration_factor = self.puct_const
+#             if self.use_action_prior:
+#                 action_prior_probability = node.prior_action_probabilities[action]
+#                 if depth == 0:
+#                     # Add Dirichlet noise
+#                     action_prior_probability *= 1 - self.root_dirichlet_noise
+#                     action_prior_probability += self.root_dirichlet_noise / self.simulator.num_of_actions
+#                 exploration_factor *= action_prior_probability
+#
+#             exploration_factor *= np.sqrt(node.visit_count) / (1 + node.action_counts[action])
+#             puct_values[action] = q_value + exploration_factor
+#
+#         return puct_values
+#
+#     def evaluate_state(self, state: torch.Tensor, exploring: bool) -> torch.Tensor:
+#         legal_actions_tensor = self.simulator.get_state_legal_actions_tensor(state)
+#
+#         with torch.no_grad():
+#             all_values = self.approximator(state).squeeze()
+#             q_values = all_values[:self.simulator.num_of_actions]
+#             legal_q_values = q_values.masked_fill_(mask=~legal_actions_tensor, value=float('-inf'))
+#             value = legal_q_values.max()
+#
+#             if self.ground_initial_state and exploring and self.simulator.is_initial_state(state):
+#                 value *= 0
+#
+#             value *= self.nn_factor
+#
+#             if self.value_clip > 0:
+#                 value = torch.clamp(value, -self.value_clip, self.value_clip)
+#
+#             if self.use_base_approximation:
+#                 value += self.base_value_approximation
+#
+#             if not self.use_action_prior:
+#                 return value.view(1)
+#
+#             action_scores = all_values[self.simulator.num_of_actions:]
+#             legal_action_scores = action_scores.masked_fill_(mask=~legal_actions_tensor, value=float('-inf'))
+#             p_values = torch.nn.functional.softmax(legal_action_scores, dim=0)
+#
+#             state_evaluation = torch.cat([value.view(1), p_values])
+#
+#             return state_evaluation
+#
+#     def step(self, explore: bool = True) -> Experience:
+#         if self.planning_strategy == "ppo":
+#             action, _ = self.plan_action(explore)
+#             experience = self.simulator.step(action)
+#             self.buffer.store_reward(experience.reward, experience.is_done)
+#             self.current_state = experience.next_state
+#             return experience
+#
+#         else:
+#             exp = super().step(explore)
+#
+#             if self.prune_tree_rate > 0 and self.step_idx % self.prune_tree_rate == 0:
+#                 self.prune_tree()
+#
+#             return exp
+#
+#     def prune_tree(self) -> None:
+#         self.monte_carlo_tree_nodes = {state: node for state, node in self.monte_carlo_tree_nodes.items() if
+#                                        node.visit_count > 0}
+#
+#     def update(self, approximator: Optional[Approximator] = None, base_value_approximation: Optional[float] = None,
+#                **kwargs) -> None:
+#         if self.planning_strategy == "ppo":
+#             if not self.buffer.ready():
+#                 return
+#             self.buffer.compute_advantages()
+#             for _ in range(self.ppo_epochs):
+#                 for states, actions, old_log_probs, returns, advantages in self.buffer.iterate_batches():
+#                     logits = self.policy_net(states)
+#                     values = self.value_net(states).squeeze(-1)
+#                     dist = Categorical(logits=logits)
+#                     entropy = dist.entropy().mean()
+#                     new_log_probs = dist.log_prob(actions)
+#
+#                     ratio = torch.exp(new_log_probs - old_log_probs)
+#                     clipped = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
+#                     policy_loss = -torch.min(ratio * advantages, clipped * advantages).mean()
+#                     value_loss = F.mse_loss(values, returns)
+#                     loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
+#
+#                     self.optimizer.zero_grad()
+#                     loss.backward()
+#                     self.optimizer.step()
+#             self.buffer.reset()
+#         else:
+#             super().update(approximator, base_value_approximation, **kwargs)
+#             self.monte_carlo_tree_nodes = {}
+#             self.warm_up()
+#
+#     def reduce_to_v_table(self) -> torch.Tensor:
+#         # Set the number of simulations to speed things up
+#         original_mc_simulations = self.mc_simulations
+#         self.mc_simulations = 1
+#
+#         # Compute the V table
+#         v_table = super().reduce_to_v_table()
+#
+#         # Set the number back
+#         self.mc_simulations = original_mc_simulations
+#
+#         return v_table
