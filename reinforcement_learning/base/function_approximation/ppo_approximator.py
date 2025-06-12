@@ -37,9 +37,9 @@ class CompatibleApproximatorWrapper:
 
     def __call__(self, state):
         logits, value = self.approximator(state)
-        probs = F.softmax(logits, dim=-1)
+        probs = torch.softmax(logits, dim=-1)
         self.target_values = torch.cat([value.view(1), probs.view(-1)])
-        return self.target_values
+        return self
 
     @property
     def policy_net(self):
