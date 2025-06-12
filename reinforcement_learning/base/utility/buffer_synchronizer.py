@@ -54,6 +54,7 @@ class BufferSynchronizer(Buffer):
                     element = self.synchronization_buffer.get()
                 else:
                     element = self.synchronization_buffer.get_nowait()
+                print(f"[Debug] element type: {type(element)}, content: {element}")
                 intermediate_buffer.append(element)
         except Empty:
             pass
