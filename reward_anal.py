@@ -9,7 +9,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 
 # 文件名
-filename = "output_greedy_v2.txt"
+filename = "output_ppo.txt"
 
 # 自动检测编码
 with open(filename, "rb") as f:

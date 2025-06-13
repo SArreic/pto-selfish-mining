@@ -7,6 +7,7 @@ length = 3000
 
 # 待处理的策略与文件名对应关系
 strategies = {
+    "ppo": "output_ppo.txt",
     "greedy": "output_greedy_v2.txt",
     "random": "output_random.txt",
     "mcts": "output_mcts.txt"
