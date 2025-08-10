@@ -19,6 +19,8 @@ from ..base.experience_acquisition.replay_buffers.ppo_buffer import PPOBuffer
 from ..base.function_approximation.approximator import Approximator
 from ..base.function_approximation.ppo_approximator import PPOApproximator, CompatibleApproximatorWrapper
 
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 class MCTSAgent(BVAAgent):
     def __init__(self, approximator: Approximator, simulator: MDPBlockchainSimulator, starting_epsilon: float,
@@ -56,7 +58,7 @@ class MCTSAgent(BVAAgent):
         self.root_dirichlet_noise = root_dirichlet_noise
         assert self.root_dirichlet_noise >= 0
 
-        self.planning_strategy = "ppo"
+        self.planning_strategy = "greedy"
         print(self.planning_strategy)
         assert self.planning_strategy in ["mcts", "greedy", "random", "ppo"]
 
@@ -70,10 +72,10 @@ class MCTSAgent(BVAAgent):
             self.optimizer = torch.optim.Adam(
                 list(self.policy_net.parameters()) + list(self.value_net.parameters()), lr=3e-4
             )
-            self.ppo_epochs = 4
-            self.clip_epsilon = 0.2
+            self.ppo_epochs = 8
+            self.clip_epsilon = 0.1
             self.value_coef = 0.5
-            self.entropy_coef = 0.01
+            self.entropy_coef = 0.05
 
         self.mc_trajectory_lengths = []
 
@@ -123,6 +125,9 @@ class MCTSAgent(BVAAgent):
             target_pi = target_pi.pow(1 / self.target_pi_temperature)
             target_pi /= target_pi.sum()
 
+            logging.info(f"[MCTS Decision] Chosen Action: {chosen_action}, "
+                         f"Estimated Value: {target_value.item():.4f}")
+
             return chosen_action, torch.cat([target_value.view(1), target_pi])
 
         elif self.planning_strategy == "greedy":
@@ -137,6 +142,11 @@ class MCTSAgent(BVAAgent):
                 target_value = legal_q_values[chosen_action]
                 target_pi = torch.zeros_like(q_values)
                 target_pi[chosen_action] = 1.0
+
+                logging.info(f"[Greedy Decision] State: {self.current_state.cpu().numpy()[:5]}, "
+                             f"Action: {chosen_action}, "
+                             f"Q-value: {target_value.item():.4f}")
+
                 return chosen_action, torch.cat([target_value.view(1), target_pi])
 
         elif self.planning_strategy == "random":
@@ -147,6 +157,10 @@ class MCTSAgent(BVAAgent):
             target_value = torch.tensor(0.0, device=self.simulator.device)
             target_pi = torch.zeros((self.simulator.num_of_actions,), device=self.simulator.device)
             target_pi[chosen_action] = 1.0
+
+            logging.info(f"[Random Decision] State: {self.current_state.cpu().numpy()[:5]}, "
+                         f"Action: {chosen_action}")
+
             return chosen_action, torch.cat([target_value.view(1), target_pi])
 
         if self.planning_strategy == "ppo":
@@ -159,7 +173,7 @@ class MCTSAgent(BVAAgent):
                     log_prob = torch.tensor(0.0, device=self.simulator.device)
                     value = self.value_net(self.current_state)
                 else:
-                    logits[~legal_actions] = float('-inf')
+                    logits[~legal_actions] = float('-1e9')
                     dist = Categorical(logits=logits)
                     action = dist.sample().item()
                     log_prob = dist.log_prob(torch.tensor(action, device=self.simulator.device))
@@ -173,6 +187,11 @@ class MCTSAgent(BVAAgent):
 
             target_pi = torch.zeros(self.simulator.num_of_actions, device=self.simulator.device)
             target_pi[action] = 1.0
+
+            logging.info(f"[PPO Decision] State: {self.current_state.cpu().numpy()}, "
+                         f"Chosen Action: {action}, "
+                         f"Log Prob: {log_prob.item():.4f}, "
+                         f"Value: {value.item():.4f}")
 
             return action, torch.cat([value.view(1), target_pi])
 
@@ -363,6 +382,7 @@ class MCTSAgent(BVAAgent):
         if self.planning_strategy == "ppo":
             action, _ = self.plan_action(explore)
             experience = self.simulator.step(action)
+            print(f"[DEBUG] PPO raw reward: {experience.reward}, type: {type(experience.reward)}")
 
             self.buffer.store_reward(experience.reward, experience.is_done)
             self.buffer.store_transition_extra(
@@ -372,6 +392,11 @@ class MCTSAgent(BVAAgent):
                 prev_difficulty=experience.prev_difficulty_contribution,
             )
 
+            logging.info(f"[Env Feedback PPO] Action: {action}, "
+                         f"Reward: {experience.reward:.4f}, "
+                         f"Done: {experience.is_done}, "
+                         f"Next State: {experience.next_state.cpu().numpy()[:5]}")
+
             self.current_state = experience.next_state
             return experience
 
@@ -380,6 +405,11 @@ class MCTSAgent(BVAAgent):
 
             if self.prune_tree_rate > 0 and self.step_idx % self.prune_tree_rate == 0:
                 self.prune_tree()
+
+            logging.info(f"[Env Feedback {self.planning_strategy.upper()}] Action: {exp.action}, "
+                         f"Reward: {exp.reward:.4f}, "
+                         f"Done: {exp.is_done}, "
+                         f"Next State: {exp.next_state.cpu().numpy()[:5]}")
 
             return exp
 

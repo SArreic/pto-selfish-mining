@@ -157,38 +157,37 @@ class EthereumPoSModel(BlockchainModel):
             reward = self.error_penalty / 2
             transitions.add(self.final_state, probability=1, reward=reward)
 
-        if action == self.Action.Withhold:
+        elif action == self.Action.Withhold:
             if length_h >= length_a or length_h == self.max_fork or length_a == self.max_fork:
                 new_state = (self.create_empty_chain() + self.create_empty_chain() +
                              (self.Fork.Relevant, pool, 0, 0, 0, 0))
-                transitions.add(new_state, probability=1, reward=reward)
+                transitions.add(new_state, probability=1, reward=0)
             elif length_a < self.max_fork and length_h < self.max_fork:
+                # 模拟攻击者链延迟的潜在收益估值
+                value_gain = max(0, (length_a - length_h) * 0.5 + (transactions_a - transactions_h) * self.fee * 0.1)
+
                 add_transaction = transactions_a < pool
-                # Add block to attacker's chain
                 new_a = self.add_block(a, add_transaction)
-                # new_a = a
                 attacker_block = (
                         new_a + h + (self.Fork.Relevant, pool, self.chain_length(new_a), length_h,
                                      transactions_a + int(add_transaction), transactions_h))
-                transitions.add(attacker_block, probability=self.alpha)
+                transitions.add(attacker_block, probability=self.alpha, reward=value_gain)
 
                 add_transaction = transactions_h < pool
-                # Add block to honest chain
                 new_h = self.add_block(h, add_transaction)
-                # new_h = h
                 honest_block = (
                         a + new_h + (self.Fork.Relevant, pool, length_a, self.chain_length(new_h),
                                      transactions_a, transactions_h + int(add_transaction)))
-                transitions.add(honest_block, probability=1 - self.alpha)
+                transitions.add(honest_block, probability=1 - self.alpha, reward=0)
             else:
-                transitions.add(self.final_state, probability=1)
+                transitions.add(self.final_state, probability=1, reward=self.error_penalty / 5)
 
         elif action == self.Action.Release:
             if length_a >= length_h:
-                # Adjust chain lengths using truncate_chain
                 new_a = self.shift_back(a, length_h)
                 accepted_blocks = length_h
                 accepted_transactions = self.chain_transactions(self.truncate_chain(a, accepted_blocks))
+                # 平滑奖励函数
                 reward = (accepted_blocks + accepted_transactions * self.fee) * self.block_reward
                 next_state = (new_a + self.create_empty_chain() + (self.Fork.Irrelevant, pool - accepted_transactions,
                                                                    self.chain_length(new_a), 0,
@@ -199,7 +198,8 @@ class EthereumPoSModel(BlockchainModel):
                 new_h = self.shift_back(h, length_a)
                 accepted_blocks = length_a
                 accepted_transactions = self.chain_transactions(self.truncate_chain(h, accepted_blocks))
-                reward = 0
+                # 部分释放失败仍给予小惩罚或机会成本
+                reward = -0.1 * accepted_transactions
                 next_state = (self.create_empty_chain() + new_h + (self.Fork.Relevant, pool - accepted_transactions,
                                                                    0, self.chain_length(new_h),
                                                                    transactions_a,
@@ -210,6 +210,7 @@ class EthereumPoSModel(BlockchainModel):
             if (fork == self.Fork.Relevant and length_a < self.max_fork and length_h < self.max_fork
                     and length_a + length_h > 0):
                 if random.random() < self.alpha:
+                    # 惩罚不大的无效操作
                     delayed_state = a + h + (
                         self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
                     transitions.add(delayed_state, probability=1, reward=self.error_penalty / 2e4)
@@ -222,9 +223,10 @@ class EthereumPoSModel(BlockchainModel):
                         self.Fork.Relevant, pool, 0, length_h,
                         0, transactions_h)
 
-                    transitions.add(next_state_1, probability=success_probability, reward=reward)
-                    transitions.add(next_state_2, probability=1 - success_probability, reward=reward)
-
+                    # 估值模型：攻击者主导成功后预计奖励
+                    value_estimation = (length_a + transactions_a * self.fee) * self.block_reward * success_probability
+                    transitions.add(next_state_1, probability=success_probability, reward=value_estimation)
+                    transitions.add(next_state_2, probability=1 - success_probability, reward=0)
             else:
                 block = self.create_empty_chain() + self.create_empty_chain() + (self.Fork.Relevant, pool, 0, 0, 0, 0)
                 transitions.add(block, probability=1, reward=self.error_penalty)
@@ -232,68 +234,45 @@ class EthereumPoSModel(BlockchainModel):
         elif action == self.Action.Vote:
             if length_a < self.max_fork and length_h < self.max_fork:
                 if random.random() < self.gamma:
-                    # 模拟区块传播延迟导致的分叉
-                    # 例如，攻击者的区块未被及时传播，导致被忽略
-                    # 可以根据具体情况调整状态转移和奖励
                     delayed_state = a + h + (
-                        self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
+                    self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
                     transitions.add(delayed_state, probability=1, reward=0)
                 elif length_a > 0 and length_h > 0:
-                    # 攻击者释放一个区块，影响链长度
-                    new_length_a = length_a - 1
-                    new_length_h = length_h - 1 if length_h > 0 else length_h  # 诚实者链长度不能小于0
+                    new_length_a = max(length_a - 1, 0)
+                    new_length_h = max(length_h - 1, 0)
+                    # 新平滑奖励函数（基于链竞争占比）
+                    reward = (new_length_a + 1) / (new_length_a + new_length_h + 2)
 
-                    # 防止链长度小于0的情况
-                    if new_length_h < 0:
-                        new_length_h = 0
-
-                    # 奖励机制：假设攻击者通过释放区块获得奖励
-                    reward = new_length_a / (1 + new_length_a + new_length_h)
-
-                    # 生成新的状态
-                    attacker_block = (
-                            a + h + (
+                    attacker_block = a + h + (
                         self.Fork.Irrelevant, pool, new_length_a, new_length_h, transactions_a, transactions_h)
-                    )
                     transitions.add(attacker_block, probability=self.alpha, reward=reward)
 
-                    # 诚实者的区块
-                    honest_block = (
-                            a + h + (
+                    honest_block = a + h + (
                         self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
+                    transitions.add(honest_block, probability=1 - self.alpha, reward=0)
+                else:
+                    # 添加新区块（攻击者或诚实者）
+                    add_transaction = transactions_a < pool
+                    new_a = self.add_block(a, add_transaction)
+                    attacker_block = (
+                            new_a + h + (
+                        self.Fork.Irrelevant, pool - int(add_transaction), self.chain_length(new_a),
+                        length_h, transactions_a + int(add_transaction), transactions_h)
                     )
-                    transitions.add(honest_block, probability=1 - self.alpha)
+                    transitions.add(attacker_block, probability=self.alpha,
+                                    reward=self.block_reward * int(add_transaction))
 
-                # 如果攻击者链长度小于max_fork且诚实者链长度小于max_fork
-                elif length_a < self.max_fork and length_h < self.max_fork:
-                    if random.random() < self.gamma:
-                        # 模拟区块传播延迟，导致的分叉，影响状态
-                        delayed_state = a + h + (
-                            self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h
-                        )
-                        transitions.add(delayed_state, probability=1, reward=0)  # 没有奖励
-                    else:
-                        # 仍然继续进行区块的添加（攻击者和诚实者各自验证并提交区块）
-                        add_transaction = transactions_a < pool
-                        new_a = self.add_block(a, add_transaction)
-                        attacker_block = (
-                                new_a + h + (
-                            self.Fork.Irrelevant, pool - int(add_transaction), self.chain_length(new_a),
-                            length_h, transactions_a + int(add_transaction), transactions_h)
-                        )
-                        transitions.add(attacker_block, probability=self.alpha)
-
-                        add_transaction = transactions_h < pool
-                        new_h = self.add_block(h, add_transaction)
-                        honest_block = (
-                                a + new_h + (self.Fork.Relevant, pool - int(add_transaction), length_a,
-                                             self.chain_length(new_h), transactions_a,
-                                             transactions_h + int(add_transaction))
-                        )
-                        transitions.add(honest_block, probability=1 - self.alpha)
+                    add_transaction = transactions_h < pool
+                    new_h = self.add_block(h, add_transaction)
+                    honest_block = (
+                            a + new_h + (self.Fork.Relevant, pool - int(add_transaction), length_a,
+                                         self.chain_length(new_h), transactions_a,
+                                         transactions_h + int(add_transaction))
+                    )
+                    transitions.add(honest_block, probability=1 - self.alpha, reward=0)
             else:
                 block = a + h + (self.Fork.Relevant, pool, length_a, length_h, transactions_a, transactions_h)
-                transitions.add(block, probability=1)
+                transitions.add(block, probability=1, reward=0)
 
         return transitions
 
