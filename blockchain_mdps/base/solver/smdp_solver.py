@@ -13,7 +13,7 @@ class SMDPSolver(BlockchainMDPSolver):
     def __init__(self, model: BlockchainModel):
         super().__init__(model, SparseBlockchainMDP(model))
 
-    def calc_opt_policy(self, discount: int = 1, epsilon: float = 1e-5, max_iter: int = 100000, skip_check: bool = True,
+    def calc_opt_policy(self, discount: int = 0.95, epsilon: float = 1e-5, max_iter: int = 100000, skip_check: bool = True,
                         verbose: bool = False) -> Tuple[BlockchainModel.Policy, float, int, np.array]:
         self.mdp.build_mdp(check_valid=not skip_check)
 

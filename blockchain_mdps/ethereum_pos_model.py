@@ -92,175 +92,108 @@ class EthereumPoSModel(BlockchainModel):
 
     def get_state_transitions(self, state: BlockchainModel.State, action: BlockchainModel.Action,
                               check_valid: bool = True) -> StateTransitions:
-        """
-        Robust transition builder:
-          - accumulate candidate next states in local dicts (prob, prob-weighted reward)
-          - perform sanity fixes: if total_prob == 0 -> add self-loop; if only one deterministic -> add tiny self-loop jitter
-          - scale down extreme penalties (self.error_penalty should be reasonably sized)
-          - finally add into StateTransitions
-        """
         transitions = StateTransitions()
+        final_state = self.final_state
+        EPS = 0.02  # ε扰动比例
+        # err = self.error_penalty if hasattr(self, 'error_penalty') else -100
+        err = -100
 
-        # safety params (tune if needed)
-        PROB_JITTER = 1e-3  # 如果某转移是确定性的，给主转移 1-PROJ 并把 PROJ 给 self-loop
-        MIN_TOTAL_PROB = 1e-12  # 近似0 的阈值
-        # 确保你的类里有合理的 error_penalty，例如 -100 而非 -100000
-        if not hasattr(self, 'error_penalty'):
-            self.error_penalty = -100.0
-
-        def _add_local(next_probs: dict, next_rew_acc: dict, s_next, p, r):
-            """accumulate probability and reward mass for a candidate next state key (use state tuples as keys)."""
-            if p <= 0:
-                return
-            # ensure key is hashable tuple
-            key = tuple(s_next) if isinstance(s_next, (list, tuple)) else s_next
-            next_probs[key] = next_probs.get(key, 0.0) + float(p)
-            # accumulate reward mass (prob * reward) to compute expected reward later
-            next_rew_acc[key] = next_rew_acc.get(key, 0.0) + float(p) * float(r)
-
-        # helpers
-        def _finalize_and_write(next_probs: dict, next_rew_acc: dict, current_state):
-            """Normalize, add jitter if needed, compute expected rewards and write to transitions."""
-            total_p = sum(next_probs.values())
-            # case: no outgoing transitions -> add self-loop with small penalty  (avoid zero row)
-            if total_p < MIN_TOTAL_PROB:
-                # prefer keep-in-place with small negative reward instead of jumping to final_state
-                transitions.add(current_state, probability=1.0, reward=-0.01)
-                return
-
-            # If deterministic single next state with prob≈1, add tiny self-loop jitter to break perfect determinism
-            if len(next_probs) == 1:
-                (only_state,), = (list(next_probs.items()),)
-                # items() trick above is a little awkward; better use:
-                only_key = next(iter(next_probs))
-                p0 = next_probs[only_key]
-                if abs(p0 - 1.0) < 1e-12:
-                    # reduce main prob slightly, give PROB_JITTER to self-loop
-                    next_probs[only_key] = 1.0 - PROB_JITTER
-                    cur_key = tuple(current_state) if isinstance(current_state, (tuple, list)) else current_state
-                    next_probs[cur_key] = next_probs.get(cur_key, 0.0) + PROB_JITTER
-                    # distribute reward mass: if self-loop wasn't present, its accumulated reward is currently 0
-                    # We leave next_rew_acc for only_key untouched; self-loop reward will be computed below as next_rew_acc.get(self,0)/prob
-                    # (we will use 0 reward for self-loop if none accumulated)
-                    total_p = 1.0
-
-            # Now normalize probabilities (in case they don't sum exactly to 1)
-            total_p = sum(next_probs.values())
-            if total_p <= 0:
-                transitions.add(current_state, probability=1.0, reward=-0.01)
-                return
-
-            for key, p in list(next_probs.items()):
-                normalized_p = float(p) / float(total_p)
-                # expected reward for this next-state:
-                reward_mass = next_rew_acc.get(key, 0.0)
-                expected_reward = (reward_mass / p) if p > 0 else 0.0
-                # ensure key is the state tuple object expected by transitions.add
-                next_state_obj = tuple(key) if isinstance(key, tuple) else key
-                transitions.add(next_state_obj, probability=normalized_p, reward=expected_reward)
-
-        # ---- build local candidate dicts instead of adding directly to transitions ----
-        next_probs = {}
-        next_rew_acc = {}  # stores sum(prob * reward) for each next-state, to compute expected reward
-        cur_state = state
-
-        # handle final_state corner
-        if check_valid and not self.is_state_valid(state):
-            # instead of jumping to final_state with huge penalty, add small negative self-loop to keep matrix well-formed
-            _add_local(next_probs, next_rew_acc, state, 1.0, float(self.error_penalty) * 0.01)
-            _finalize_and_write(next_probs, next_rew_acc, state)
+        if state == final_state:
+            transitions.add(final_state, probability=1.0, reward=0.0)
             return transitions
 
-        if state == self.final_state:
-            transitions.add(self.final_state, probability=1.0, reward=0.0)
-            return transitions
+        a_len, h_len, fork, w_a, w_h, visibility, pool, active_stake = self.dissect_state(state)
 
-        # ------------------ original transition logic (use _add_local instead of transitions.add) ------------
-        a, h, fork = state
+        total_prob = 0.0
 
-        # Illegal: instead of final_state with huge penalty, penalize but keep self-loop fallback
         if action == self.Action.Illegal:
-            # penalize but do not create absorbing sink; prefer a failed self-loop for numerical stability
-            _add_local(next_probs, next_rew_acc, state, 1.0, float(self.error_penalty) * 0.1)
-
-        elif action == self.Action.Withhold:
-            if a >= self.max_fork or h >= self.max_fork:
-                # invalid -> small penalty but keep in state (not absorbing)
-                _add_local(next_probs, next_rew_acc, state, 1.0, float(self.error_penalty) * 0.1)
-            else:
-                # attacker advances with prob alpha
-                next_s = (a + 1, h, self.Fork.Irrelevant)
-                _add_local(next_probs, next_rew_acc, next_s, self.alpha, 0.0)
-                # honest advances with prob 1-alpha
-                next_s2 = (a, h + 1, self.Fork.Relevant)
-                _add_local(next_probs, next_rew_acc, next_s2, 1.0 - self.alpha, 0.0)
-
-        elif action == self.Action.ReleaseOne:
-            if a > 0 and a > h:
-                # success likely -> reduce attacker's withheld by one (approx)
-                next_s = (a - 1, 0, self.Fork.Irrelevant)
-                # reward small and proportional to h+1 (or some smoother function)
-                _add_local(next_probs, next_rew_acc, next_s, 1.0, float(h + 1))
-            else:
-                # failure -> small negative reward but keep state instead of jumping to final_state
-                _add_local(next_probs, next_rew_acc, state, 1.0, float(self.error_penalty) * 0.05)
-
-        elif action == self.Action.ReleaseAll:
-            # more delicate: if attacker chain dominates, large payoff; otherwise small cost
-            if a > h:
-                # partial success: collapse to cleaned state
-                next_s = (0, 0, self.Fork.Irrelevant)
-                _add_local(next_probs, next_rew_acc, next_s, 1.0, float(a - h))
-            else:
-                # not profitable, small cost but keep state
-                _add_local(next_probs, next_rew_acc, state, 1.0, float(self.error_penalty) * 0.05)
-
-        elif action == self.Action.Equivocate:
-            if fork == self.Fork.Relevant and (a + h) > 0:
-                succ_prob = float(a) / float(a + h)
-                next_s1 = (a, 0, self.Fork.Active)
-                next_s2 = (0, h, self.Fork.Active)
-                _add_local(next_probs, next_rew_acc, next_s1, succ_prob, 0.0)
-                _add_local(next_probs, next_rew_acc, next_s2, 1.0 - succ_prob, 0.0)
-            else:
-                _add_local(next_probs, next_rew_acc, state, 1.0, float(self.error_penalty) * 0.05)
-
-        elif action == self.Action.Attest:
-            # Attest/fast path with gamma (propagation) effect
-            # If fork inactive
-            if fork != self.Fork.Active and a < self.max_fork and h < self.max_fork:
-                next_s1 = (a + 1, h, self.Fork.Irrelevant)
-                next_s2 = (a, h + 1, self.Fork.Relevant)
-                _add_local(next_probs, next_rew_acc, next_s1, self.alpha, 0.0)
-                _add_local(next_probs, next_rew_acc, next_s2, 1.0 - self.alpha, 0.0)
-            elif fork == self.Fork.Active and (0 < h <= a < self.max_fork):
-                next_s1 = (a + 1, h, self.Fork.Active)
-                _add_local(next_probs, next_rew_acc, next_s1, self.alpha, 0.0)
-                next_s2 = (a - h, 1, self.Fork.Relevant)
-                next_s3 = (a, h + 1, self.Fork.Relevant)
-                _add_local(next_probs, next_rew_acc, next_s2, self.gamma * (1.0 - self.alpha), float(h))
-                _add_local(next_probs, next_rew_acc, next_s3, (1.0 - self.gamma) * (1.0 - self.alpha), 0.0)
-            else:
-                _add_local(next_probs, next_rew_acc, state, 1.0, float(self.error_penalty) * 0.05)
-
-        elif action == self.Action.Censor:
-            # Censor does not change chain height much; give small reward if succeed
-            _add_local(next_probs, next_rew_acc, (a, h, fork), 1.0, 0.1)
-
-        elif action == self.Action.SelectiveRelay:
-            # create temporary effect: increase gamma locally (we emulate by making next state same but add small cost)
-            _add_local(next_probs, next_rew_acc, (a, h, fork), 1.0, -0.01)
+            transitions.add(final_state, probability=1.0, reward=err)
+            total_prob = 1.0
 
         elif action == self.Action.Exit:
-            # model stake exit by keeping state but giving small negative (opportunity cost)
-            _add_local(next_probs, next_rew_acc, (a, h, fork), 1.0, -0.02)
+            transitions.add(final_state, probability=1.0, reward=-0.1)
+            total_prob = 1.0
 
-        else:
-            # fallback (shouldn't happen)
-            _add_local(next_probs, next_rew_acc, state, 1.0, -0.01)
+        elif action == self.Action.Withhold:
+            if a_len < self.max_fork:
+                next_attacker = self.reassemble_state(a_len + 1, h_len, fork, w_a + 1, w_h, visibility, pool,
+                                                      active_stake)
+                transitions.add(next_attacker, probability=self.alpha, reward=0.1)
+                total_prob += self.alpha
+            if h_len < self.max_fork:
+                next_honest = self.reassemble_state(a_len, h_len + 1, fork, w_a, w_h, visibility, pool, active_stake)
+                transitions.add(next_honest, probability=1 - self.alpha, reward=0.0)
+                total_prob += (1 - self.alpha)
 
-        # ---- finalize: normalize, jitter, and write into transitions ----
-        _finalize_and_write(next_probs, next_rew_acc, state)
+        elif action == self.Action.ReleaseOne:
+            if a_len > h_len:
+                new_a = max(a_len - 1, 0)
+                next_state = self.reassemble_state(new_a, h_len, fork, w_a - 1, w_h, visibility, pool, active_stake)
+                transitions.add(next_state, probability=1.0, reward=1.0)
+                total_prob = 1.0
+            else:
+                transitions.add(final_state, probability=1.0, reward=err)
+                total_prob = 1.0
+
+        elif action == self.Action.ReleaseAll:
+            if a_len > h_len:
+                next_state = self.reassemble_state(0, h_len, fork, 0, w_h, visibility, pool, active_stake)
+                reward = a_len * 1.0
+                transitions.add(next_state, probability=1.0, reward=reward)
+                total_prob = 1.0
+            else:
+                transitions.add(final_state, probability=1.0, reward=err)
+                total_prob = 1.0
+
+        elif action == self.Action.Equivocate:
+            if a_len + h_len > 0:
+                success_prob = a_len / (a_len + h_len)
+                next_attack = self.reassemble_state(a_len, 0, fork, w_a, 0, visibility, pool, active_stake)
+                next_honest = self.reassemble_state(0, h_len, fork, 0, w_h, visibility, pool, active_stake)
+                transitions.add(next_attack, probability=success_prob, reward=0.5)
+                transitions.add(next_honest, probability=1 - success_prob, reward=0.0)
+                total_prob = 1.0
+            else:
+                transitions.add(final_state, probability=1.0, reward=err)
+                total_prob = 1.0
+
+        elif action == self.Action.Attest:
+            if a_len < self.max_fork:
+                next_attack = self.reassemble_state(a_len + 1, h_len, fork, w_a, w_h, visibility, pool, active_stake)
+                transitions.add(next_attack, probability=self.alpha, reward=0.2)
+                total_prob += self.alpha
+            if h_len < self.max_fork:
+                next_honest = self.reassemble_state(a_len, h_len + 1, fork, w_a, w_h, visibility, pool, active_stake)
+                transitions.add(next_honest, probability=1 - self.alpha, reward=0.0)
+                total_prob += (1 - self.alpha)
+
+        elif action == self.Action.SelectiveRelay:
+            transitions.add(state, probability=1.0 - EPS, reward=0.05)
+            total_prob += (1.0 - EPS)
+            if a_len < self.max_fork:
+                next_attack = self.reassemble_state(a_len + 1, h_len, fork, w_a, w_h, visibility, pool, active_stake)
+                transitions.add(next_attack, probability=EPS * self.alpha, reward=0.0)
+                total_prob += EPS * self.alpha
+            if h_len < self.max_fork:
+                next_honest = self.reassemble_state(a_len, h_len + 1, fork, w_a, w_h, visibility, pool, active_stake)
+                transitions.add(next_honest, probability=EPS * (1 - self.alpha), reward=0.0)
+                total_prob += EPS * (1 - self.alpha)
+
+        elif action == self.Action.Censor:
+            transitions.add(state, probability=1.0 - EPS, reward=0.05)
+            total_prob += (1.0 - EPS)
+            if a_len < self.max_fork:
+                next_attack = self.reassemble_state(a_len + 1, h_len, fork, w_a, w_h, visibility, pool, active_stake)
+                transitions.add(next_attack, probability=EPS * self.alpha, reward=0.0)
+                total_prob += EPS * self.alpha
+            if h_len < self.max_fork:
+                next_honest = self.reassemble_state(a_len, h_len + 1, fork, w_a, w_h, visibility, pool, active_stake)
+                transitions.add(next_honest, probability=EPS * (1 - self.alpha), reward=0.0)
+                total_prob += EPS * (1 - self.alpha)
+
+        if total_prob < 1.0 - 1e-9:
+            transitions.add(final_state, probability=1.0 - total_prob, reward=0.0)
+
         return transitions
 
     # 你可以保留 get_honest_revenue（或改名）以配合训练监控
