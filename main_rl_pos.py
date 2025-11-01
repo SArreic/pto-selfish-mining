@@ -244,20 +244,16 @@ class RewardLogger:
 
 def run_mcts_fees(args: argparse.Namespace):
     alpha = args.alpha
-    gamma = args.gamma
     max_fork = args.max_fork
     fee = args.fee
     transaction_chance = args.delta
-    # simple_mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
-    # simple_mdp = EthereumModel(alpha=alpha, max_fork=max_fork)
-    simple_mdp = EthereumUserModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
+    simple_mdp = EthereumUserModel(alpha=alpha, max_fork=max_fork)
     rev, _ = solve_mdp_exactly(simple_mdp)
     print("rev is ", rev)
     print("The best policy is {}".format(_))
     # mdp = BitcoinFeeModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
     #                       max_pool=max_fork)
-    mdp = EthereumPoSModel(alpha=alpha, gamma=gamma, max_fork=max_fork, fee=fee, transaction_chance=transaction_chance,
-                           max_pool=max_fork)
+    mdp = EthereumPoSModel(alpha=alpha, max_fork=max_fork)
     # mdp = BitcoinModel(alpha=alpha, gamma=gamma, max_fork=max_fork)
     smart_init = rev * (1 + fee * transaction_chance)
     # smart_init = None

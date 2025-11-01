@@ -44,6 +44,8 @@ class PTOSolver(BlockchainMDPSolver):
                     print(f"Action {action} - Transition probabilities matrix (sparse):")
             raise e
 
+        print("calc_opt_policy ends.")
+
         return vi.policy, vi.V[self.mdp.initial_state_index] / self.expected_horizon, vi.iter, vi.V
 
     def get_pt_mdp(self) -> Tuple[Union[np.array, List[spmatrix]], Union[np.array, List[spmatrix]]]:
