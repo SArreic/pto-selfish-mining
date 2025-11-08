@@ -41,8 +41,8 @@ class EthereumPoSModel(BlockchainModel):
 
         # define enums like BitcoinFeeModel style
         self.Fork = self.create_int_enum('Fork', ['Irrelevant', 'Relevant', 'Active'])
-        # self.Action = self.create_int_enum('Action', ['Wait', 'Withhold', 'Adopt', 'Release', 'Equivocate', 'Exit'])
-        self.Action = self.create_int_enum('Action', ['Illegal', 'Wait', 'Withhold', 'Adopt', 'Release', 'Equivocate'])
+        self.Action = self.create_int_enum('Action', ['Illegal', 'Wait', 'Withhold', 'Adopt',
+                                                      'Release', 'Equivocate', 'Exit'])
         # Make minimal placeholders for chain block representation (not used as vector here)
         self.Dummy = self.create_int_enum('Dummy', ['Zero'])
 
@@ -139,6 +139,12 @@ class EthereumPoSModel(BlockchainModel):
         dummy, fork, pool, user, priv_len, pub_len, slashed = self.dissect_state(state)
         action_type, action_param = action
 
+        # --- 参数合法性检查（参照 BitcoinFeeModel） ---
+        if action_type in [self.Action.Wait, self.Action.Withhold, self.Action.Adopt,
+                           self.Action.Equivocate, self.Action.Exit] and action_param != 0:
+            transitions.add(self.get_final_state(), probability=1, reward=self.error_penalty)
+            return transitions
+
         # If already slashed then we treat that as still in-system but penalized:
         if slashed == 1:
             # after being slashed, agent continues but gets no base reward until exit (simplification).
@@ -167,8 +173,12 @@ class EthereumPoSModel(BlockchainModel):
             # Reward: base_reward * stake_ratio for Wait (user participates and collects proportional reward)
             reward = self.base_reward * stake_ratio
 
-            transitions.add(attacker_state, probability=p_attacker, reward=reward)
-            transitions.add(honest_state, probability=p_honest, reward=reward)
+            if attacker_state == honest_state:
+                total_prob = p_attacker + p_honest
+                transitions.add(attacker_state, probability=total_prob, reward=reward)
+            else:
+                transitions.add(attacker_state, probability=p_attacker, reward=reward)
+                transitions.add(honest_state, probability=p_honest, reward=reward)
 
             return transitions
 
@@ -185,8 +195,11 @@ class EthereumPoSModel(BlockchainModel):
                 dummy, self.Fork.Irrelevant, pool, user, priv_len, self.safe_truncate(pub_len + 1), slashed)
 
             # Withhold gives zero immediate reward
-            transitions.add(next_state_success, probability=p_success, reward=0.0)
-            transitions.add(next_state_fail, probability=1.0 - p_success, reward=0.0)
+            if next_state_success == next_state_fail:
+                transitions.add(next_state_success, probability=1, reward=0.0)
+            else:
+                transitions.add(next_state_success, probability=p_success, reward=0.0)
+                transitions.add(next_state_fail, probability=1.0 - p_success, reward=0.0)
 
             return transitions
 
@@ -263,25 +276,27 @@ class EthereumPoSModel(BlockchainModel):
             p_gain = p_fork * fork_gain_prob
             p_no_gain_fork = p_fork * (1.0 - fork_gain_prob)
 
+            # ---- Safe adds (merge duplicates automatically) ----
             transitions.add(state_on_fork_gain, probability=p_gain, reward=0.0)
-            transitions.add(state_on_fork_no_gain, probability=p_no_gain_fork, reward=0.0)
-            transitions.add(state_on_slash, probability=p_slash, reward=slash_penalty)
+            transitions.add(state_on_fork_no_gain, probability=p_no_gain_fork, reward=0.0, allow_merging=True)
+            transitions.add(state_on_slash, probability=p_slash, reward=slash_penalty, allow_merging=True)
+
             # If p_no_effect > 0, we model it as trivial no-op that advances public chain
             if p_no_effect > 0:
                 next_pub_advance = (
                     dummy, self.Fork.Irrelevant, pool, user, priv_len, self.safe_truncate(pub_len + 1), slashed)
-                transitions.add(next_pub_advance, probability=p_no_effect, reward=0.0)
+                transitions.add(next_pub_advance, probability=p_no_effect, reward=0.0, allow_merging=True)
 
             return transitions
 
         # ------- EXIT -------
-        # if action_type is self.Action.Exit:
-        #     # Exit: user collects stake_user and stops participating. For simplicity, go to final state.
-        #     # reward: return stake_user (or proportion)
-        #     reward = 0.0
-        #     # final state representation uses get_final_state()
-        #     transitions.add(self.get_final_state(), probability=1.0, reward=reward)
-        #     return transitions
+        if action_type is self.Action.Exit:
+            # Exit: user collects stake_user and stops participating. For simplicity, go to final state.
+            # reward: return stake_user (or proportion)
+            reward = 0.0
+            # final state representation uses get_final_state()
+            transitions.add(self.get_final_state(), probability=1.0, reward=reward)
+            return transitions
 
         # Fallback
         transitions.add(self.get_final_state(), probability=1.0, reward=self.error_penalty)

@@ -8,19 +8,21 @@ length = 3000
 
 # 策略与文件名对应关系
 strategies = {
-    "ppo": "output_ppo.txt",
-    "greedy": "output_greedy.txt",
-    "random": "output_random.txt",
-    # "mcts": "output_mcts.txt"
+    # "ppo": "output_ppo.txt",
+    # "greedy": "output_greedy.txt",
+    # "random": "output_random.txt",
+    "mcts": "mcts_result.txt"
 }
 
 # 动作名称映射
 action_names = {
     0: "Illegal",
-    1: "Withhold",
-    2: "Release",
-    3: "Equivocate",
-    4: "Vote"
+    1: "Wait",
+    2: "Withhold",
+    3: "Adopt",
+    4: "Release",
+    5: "Equivocate",
+    6: "Exit"
 }
 
 # 日志匹配正则
@@ -28,7 +30,7 @@ decision_pattern = re.compile(r"\[(\w+) Decision\].*Action: (\d+), Estimated Val
 reward_pattern = re.compile(r"\[Env Feedback (\w+)\].*Action: (\d+), Reward: ([\d\.\-eE]+)")
 
 # 输出目录
-output_dir = "analysis_results"
+output_dir = "results_analyze"
 os.makedirs(output_dir, exist_ok=True)
 
 
@@ -149,4 +151,4 @@ plt.tight_layout()
 plt.savefig(os.path.join(output_dir, "all_strategies_total_reward_comparison.png"))
 plt.show()
 
-print("✅ 所有分析完成，图像已保存到 'analysis_results/' 文件夹中。")
+print("✅ 所有分析完成，图像已保存到 'results_analyze/' 文件夹中。")

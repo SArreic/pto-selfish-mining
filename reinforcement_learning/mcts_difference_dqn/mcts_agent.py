@@ -58,7 +58,7 @@ class MCTSAgent(BVAAgent):
         self.root_dirichlet_noise = root_dirichlet_noise
         assert self.root_dirichlet_noise >= 0
 
-        self.planning_strategy = "greedy"
+        self.planning_strategy = "ppo"
         print(self.planning_strategy)
         assert self.planning_strategy in ["mcts", "greedy", "random", "ppo"]
 
