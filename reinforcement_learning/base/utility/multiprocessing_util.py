@@ -6,4 +6,7 @@ def get_process_name() -> str:
 
 
 def get_process_index() -> int:
-    return int(get_process_name().split(' ')[-1])
+    try:
+        return int(get_process_name().split(' ')[-1])
+    except ValueError:
+        return 0

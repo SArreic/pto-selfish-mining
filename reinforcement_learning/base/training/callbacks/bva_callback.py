@@ -16,8 +16,8 @@ class BVACallback(SynchronizedCallback):
         super().__init__()
         self.agent = None
         self.smart_init = smart_init
-        self.num_of_episodes_for_average = num_of_episodes_for_average
-        self.episode_values = deque(maxlen=num_of_episodes_for_average)
+        self.num_of_episodes_for_average = num_of_episodes_for_average if num_of_episodes_for_average is not None else 20
+        self.episode_values = deque(maxlen=self.num_of_episodes_for_average)
         self.stop_goal = stop_goal
         self.epoch_history = []
         self.sort_episodes = sort_episodes

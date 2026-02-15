@@ -4,3 +4,4 @@ from .dqn.dqn_trainer import DQNTrainer
 from .lookahead_difference_dqn.lddqn_trainer import LDDQNTrainer
 from .lookahead_sm_dqn.lsmdqn_trainer import LSMDQNTrainer
 from .mcts_difference_dqn.mcts_trainer import MCTSTrainer
+from .hp3o.hp3o_trainer import HP3OTrainer

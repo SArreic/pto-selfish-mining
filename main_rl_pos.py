@@ -277,6 +277,40 @@ def run_mcts_fees(args: argparse.Namespace):
     log_solution_info(mdp, rev, trainer)
 
 
+def run_hp3o_fees(args: argparse.Namespace):
+    alpha = args.alpha
+    max_fork = args.max_fork
+    fee = args.fee
+    transaction_chance = args.delta
+    simple_mdp = EthereumUserModel(alpha=alpha, max_fork=max_fork)
+    rev, _ = solve_mdp_exactly(simple_mdp)
+    print("rev is ", rev)
+    print("The best policy is {}".format(_))
+    
+    mdp = EthereumPoSModel(alpha=alpha, max_fork=max_fork)
+    smart_init = rev * (1 + fee * transaction_chance)
+    print(f'Starting HP3O Training. State space size: {mdp.state_space.size:,}')
+
+    trainer = HP3OTrainer(mdp, build_info=args.build_info,
+                          output_root=args.output_root, random_seed=args.seed,
+                          expected_horizon=10_000, batch_size=100,
+                          learning_rate=args.lr, bva_smart_init=smart_init,
+                          num_of_epochs=5001, train_episode_length=100,
+                          evaluate_episode_length=100,
+                          num_of_episodes_for_average=args.num_episodes_avg,
+                          hp3o_epochs=args.hp3o_epochs,
+                          hp3o_batch_trajectories=args.hp3o_batch_trajectories,
+                          trajectory_buffer_size=args.trajectory_buffer_size,
+                          hp3o_plus=args.hp3o_plus,
+                          lower_priority=args.no_bg, bind_all=args.bind_all,
+                          load_experiment=args.load_experiment,
+                          callbacks=[RewardLogger()])
+
+    trainer.run()
+
+    log_solution_info(mdp, rev, trainer)
+
+
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, interrupt_handler)
     signal.signal(signal.SIGTERM, interrupt_handler)
@@ -296,11 +330,25 @@ if __name__ == '__main__':
     parser.add_argument('--delta', help='chance for a transaction', default=0.01, type=float)
     parser.add_argument('--seed', help='random seed', default=0, type=int)
     parser.add_argument('--lr', help='learning_rate', default=2e-4, type=float)
+    parser.add_argument('--num_episodes_avg', help='number of episodes for average calculation', default=100, type=int)
+    parser.add_argument('--algo', help='algorithm to use (mcts, hp3o, lddqn)', default='mcts')
+    parser.add_argument('--hp3o_epochs', help='PPO epochs for HP3O', default=10, type=int)
+    parser.add_argument('--hp3o_batch_trajectories', help='Number of trajectories in HP3O batch', default=4, type=int)
+    parser.add_argument('--trajectory_buffer_size', help='Size of HP3O trajectory buffer', default=10, type=int)
+    parser.add_argument('--hp3o_plus', help='Use HP3O+ version', action='store_true')
 
     start_time = time.perf_counter()  # 更精确的计时器
 
     # solve_pt(parser.parse_args())
-    run_mcts_fees(parser.parse_args())
+    args = parser.parse_args()
+    if args.algo == 'mcts':
+        run_mcts_fees(args)
+    elif args.algo == 'hp3o':
+        run_hp3o_fees(args)
+    elif args.algo == 'lddqn':
+        solve_pt(args)
+    else:
+        print(f"Unknown algorithm: {args.algo}")
 
     end_time = time.perf_counter()
 
